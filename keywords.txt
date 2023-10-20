@@ -1,0 +1,50 @@
+#######################################
+# Syntax Coloring Map For VsRealityKinisi
+#######################################
+
+#######################################
+# Class (KEYWORD1)
+#######################################
+
+KinisiController	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+initialize_motor	KEYWORD2
+
+set_motor_speed	KEYWORD2
+
+initialize_motor_controller	KEYWORD2
+
+set_motor_target_velocity	KEYWORD2
+
+delete_motor_controller	KEYWORD2
+
+initialize_encoder	KEYWORD2
+
+get_encoder_value	KEYWORD2
+
+set_pin_low	KEYWORD2
+
+set_pin_high	KEYWORD2
+
+toggle_pin	KEYWORD2
+
+set_status_led_off	KEYWORD2
+
+set_status_led_on	KEYWORD2
+
+toggle_status_led	KEYWORD2
+
+initialize_platform	KEYWORD2
+
+set_platform_velocity_input	KEYWORD2
+
+set_platform_controller	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
