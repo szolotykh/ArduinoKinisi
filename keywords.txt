@@ -26,17 +26,17 @@ initialize_encoder	KEYWORD2
 
 get_encoder_value	KEYWORD2
 
-set_pin_low	KEYWORD2
+initialize_gpio_pin	KEYWORD2
 
-set_pin_high	KEYWORD2
+set_gpio_pin_state	KEYWORD2
 
-toggle_pin	KEYWORD2
+get_gpio_pin_state	KEYWORD2
 
-set_status_led_off	KEYWORD2
+toggle_gpio_pin_state	KEYWORD2
 
-set_status_led_on	KEYWORD2
+set_status_led_state	KEYWORD2
 
-toggle_status_led	KEYWORD2
+toggle_status_led_state	KEYWORD2
 
 initialize_platform	KEYWORD2
 
