@@ -10,7 +10,7 @@ void setup() {
 }
 
 void loop() {
-  controller.toggle_status_led(); // Send toggle command to the Kinisi controller
+  controller.toggle_status_led_state(); // Send toggle command to the Kinisi controller
   
   ledState = !ledState; // Invert LED state
   digitalWrite(ledPin, ledState ? HIGH : LOW); // Update LED state

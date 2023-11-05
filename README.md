@@ -1,6 +1,8 @@
 # ArduinoKinisi
-Arduino library for kinisi motion controller. This library allows to control kinisi motion controller from Arduino board via I2C interface.
-Note: This library is not compatible with only 3.3V Arduino boards. 
+Arduino library for kinisi motion controller. This library allows to control kinisi motion controller from Arduino board via I2C interface.\
+Discription of the motor controller commands can be find here: [Kinisi Motion Controller Commands](https://github.com/szolotykh/kinisi-motor-controller-firmware/blob/main/commands.md)\
+Follow Arduino library installation instructions to install this library manually: [Installing Libraries](https://docs.arduino.cc/software/ide-v1/tutorials/installing-libraries)\
+*Note: This library is not compatible with only 3.3V Arduino boards.*
 
 ## Examples
 Below is the example of using this library to control the status LED on the kinisi motion controller:
@@ -18,7 +20,7 @@ void setup() {
 }
 
 void loop() {
-  controller.toggle_status_led(); // Send toggle command to the Kinisi controller
+  controller.toggle_status_led_state(); // Send toggle command to the Kinisi controller
   
   ledState = !ledState; // Invert LED state
   digitalWrite(ledPin, ledState ? HIGH : LOW); // Update LED state

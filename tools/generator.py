@@ -31,18 +31,21 @@ def generate_kinisi_h_file(commands_data):
     kinisi_controller_class += "    void begin();\n\n"
 
     for cmd in commands_data['commands']:
+        response = cmd.get('response', None)
+        return_type = response['type'] if response else "void"
         kinisi_controller_class += f"    // {cmd['command']}: {cmd['description']}\n"
         func_args = ', '.join([f"{prop['type']} {prop['name']}" for prop in cmd.get('properties', [])])
-        kinisi_controller_class += f"    void {cmd['command'].lower()}({func_args});\n\n"
+        kinisi_controller_class += f"    {return_type} {cmd['command'].lower()}({func_args});\n\n"
 
     kinisi_controller_class += "private:\n"
-    kinisi_controller_class += "    int address;\n"
+    kinisi_controller_class += "    uint8_t address;\n"
     kinisi_controller_class += "};\n\n"
     
     result = file_header(commands_data['version'])
     result += "#ifndef KINISI_H\n"
     result += "#define KINISI_H\n\n"
-    result += "#include \"Arduino.h\"\n\n"
+    result += "#include \"Arduino.h\"\n"
+    result += "#include \"i2cutils.h\"\n\n"
     result += definitions
     result += "\n"
     result += kinisi_controller_class
@@ -71,15 +74,22 @@ def generate_kinisi_cpp_file(commands_data):
         properties = cmd.get('properties', [])
         class_methods += f"// {cmd['command']}: {cmd['description']}\n"
         func_args = ', '.join([f"{prop['type']} {prop['name']}" for prop in properties])
-        class_methods += f"void KinisiController::{cmd['command'].lower()}({func_args})\n"
+
+        # Method return type
+        response = cmd.get('response', None)
+        return_type = response['type'] if response else "void"
+
+        # Method body
+        class_methods += f"{return_type} KinisiController::{cmd['command'].lower()}({func_args})\n"
         class_methods += "{\n"
         class_methods += f"    unsigned char cmd[] = {{{cmd['command']}{', ' if len(properties) > 0 else ''}{', '.join([prop['name'] for prop in properties])}}};\n"
-        class_methods += f"    Wire.beginTransmission(this->address);\n"
-        class_methods += f"    Wire.write(sizeof(cmd));\n"
-        class_methods += f"    Wire.endTransmission();\n\n"
-        class_methods += f"    Wire.beginTransmission(this->address);\n" 
-        class_methods += f"    Wire.write(cmd, sizeof(cmd));\n"
-        class_methods += f"    Wire.endTransmission();\n"
+        class_methods += f"    SendMessage(this->address, cmd, sizeof(cmd));\n"
+
+        if response:
+            class_methods += f"    uint8_t response[sizeof({response['type']})] = {{0}};\n"
+            class_methods += f"    ReceiveResponse(this->address, response, sizeof({response['type']}));\n"
+            class_methods += f"    return *({response['type']}*)response;\n"
+
         class_methods += "}\n\n"
 
     # Put everything together
