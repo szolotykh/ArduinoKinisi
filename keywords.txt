@@ -16,15 +16,31 @@ initialize_motor	KEYWORD2
 
 set_motor_speed	KEYWORD2
 
+stop_motor	KEYWORD2
+
+brake_motor	KEYWORD2
+
 initialize_motor_controller	KEYWORD2
 
-set_motor_target_velocity	KEYWORD2
+set_motor_target_speed	KEYWORD2
+
+reset_motor_controller	KEYWORD2
+
+get_motor_controller_state	KEYWORD2
 
 delete_motor_controller	KEYWORD2
 
 initialize_encoder	KEYWORD2
 
 get_encoder_value	KEYWORD2
+
+start_encoder_odometry	KEYWORD2
+
+reset_encoder_odometry	KEYWORD2
+
+stop_encoder_odometry	KEYWORD2
+
+get_encoder_odometry	KEYWORD2
 
 initialize_gpio_pin	KEYWORD2
 
@@ -38,11 +54,29 @@ set_status_led_state	KEYWORD2
 
 toggle_status_led_state	KEYWORD2
 
-initialize_platform	KEYWORD2
+initialize_mecanum_platform	KEYWORD2
 
-set_platform_velocity_input	KEYWORD2
+initialize_omni_platform	KEYWORD2
 
-set_platform_controller	KEYWORD2
+initialize_differential_platform	KEYWORD2
+
+set_platform_velocity	KEYWORD2
+
+start_platform_controller	KEYWORD2
+
+set_platform_target_velocity	KEYWORD2
+
+get_platform_current_velocity	KEYWORD2
+
+stop_platform_controller	KEYWORD2
+
+start_platform_odometry	KEYWORD2
+
+reset_platform_odometry	KEYWORD2
+
+stop_platform_odometry	KEYWORD2
+
+get_platform_odometry	KEYWORD2
 
 #######################################
 # Constants (LITERAL1)
