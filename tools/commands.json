@@ -1,10 +1,10 @@
 {
-    "version": "1.1.0",
+    "version": "1.4.0",
     "commands": [
         {
             "command": "INITIALIZE_MOTOR",
             "code": "0x01",
-            "description": "This command initializes a motor and prepares it for use.",
+            "description": "This command initializes a motor and prepares it for use. Ignored if the motor is currently owned by an active platform (one of its wheels), so platform wheels are not reconfigured out from under the platform.",
             "properties": [
                 {
                     "name": "motor_index",
@@ -27,7 +27,7 @@
         {
             "command": "SET_MOTOR_SPEED",
             "code": "0x02",
-            "description": "This command sets the speed of the specified motor in PWM.",
+            "description": "This command sets the speed of the specified motor in PWM. Ignored if the motor is currently owned by an active platform (one of its wheels); use the platform velocity commands to drive platform wheels.",
             "properties": [
                 {
                     "name": "motor_index",
@@ -53,7 +53,7 @@
         {
             "command": "STOP_MOTOR",
             "code": "0x03",
-            "description": "This command stops motor by setting its speed to 0.",
+            "description": "Coasts the motor to a stop: both H-bridge outputs are driven low, leaving the motor terminals open (high impedance) so it free-wheels and spins down gradually under its own friction. This also stops that motor's closed-loop speed controller if one is running (started via INITIALIZE_MOTOR_CONTROLLER), so the PID loop cannot re-drive the motor; to command the motor by target speed again you must re-initialize its controller. This is a single-motor command and is ignored if the motor is currently owned by an active platform (one of its wheels); to stop a platform, use STOP_PLATFORM_CONTROLLER, COAST_PLATFORM or BRAKE_PLATFORM instead. Use STOP_MOTOR for a soft, low-stress stop; use BRAKE_MOTOR when you need the motor to hold position and stop quickly.",
             "properties": [
                 {
                     "name": "motor_index",
@@ -70,7 +70,7 @@
         {
             "command": "BRAKE_MOTOR",
             "code": "0x04",
-            "description": "This command brakes motor.",
+            "description": "Actively brakes the motor (short brake): both H-bridge outputs are driven high, shorting the motor terminals together so the motor's own back-EMF resists rotation and it stops quickly and holds position. This also stops that motor's closed-loop speed controller if one is running (started via INITIALIZE_MOTOR_CONTROLLER), so the PID loop cannot re-drive the motor; to command the motor by target speed again you must re-initialize its controller. This is a single-motor command and is ignored if the motor is currently owned by an active platform (one of its wheels); to brake a platform, use BRAKE_PLATFORM (or STOP_PLATFORM_CONTROLLER / COAST_PLATFORM) instead. Use BRAKE_MOTOR for a fast, holding stop; use STOP_MOTOR to let the motor coast freely instead.",
             "properties": [
                 {
                     "name": "motor_index",
@@ -87,7 +87,7 @@
         {
             "command": "INITIALIZE_MOTOR_CONTROLLER",
             "code": "0x05",
-            "description": "This command sets the controller for the specified motor.",
+            "description": "This command sets the controller for the specified motor. Ignored if the motor is currently owned by an active platform (one of its wheels), so it cannot create a competing controller on a platform wheel.",
             "properties": [
                 {
                     "name": "motor_index",
@@ -150,7 +150,7 @@
         {
             "command": "SET_MOTOR_TARGET_SPEED",
             "code": "0x06",
-            "description": "This command sets the target speed for the specified motor in radians.",
+            "description": "This command sets the target speed for the specified motor in radians. Ignored if the motor is currently owned by an active platform (one of its wheels); use SET_PLATFORM_TARGET_VELOCITY to drive platform wheels.",
             "properties": [
                 {
                     "name": "motor_index",
@@ -172,7 +172,7 @@
         {
             "command": "RESET_MOTOR_CONTROLLER",
             "code": "0x07",
-            "description": "This command resets the controller for the specified motor.",
+            "description": "This command resets the closed-loop controller for the specified motor: it clears the accumulated PID state (integrator windup, derivative history and internal output) and re-zeros the target speed, while keeping the controller running with its existing tuning (kp/ki/kd). Use it to recover from integrator windup or to bring a motor cleanly to a stop without deleting and re-initializing the controller. No effect if no controller is running for that motor, and ignored if the motor is currently owned by an active platform (one of its wheels).",
             "properties": [
                 {
                     "name": "motor_index",
@@ -210,7 +210,7 @@
         {
             "command": "DELETE_MOTOR_CONTROLLER",
             "code": "0x09",
-            "description": "This command deletes the controller for the specified motor.",
+            "description": "This command deletes the controller for the specified motor. Ignored if the motor is currently owned by an active platform (one of its wheels); use STOP_PLATFORM_CONTROLLER to stop the platform controller instead.",
             "properties": [
                 {
                     "name": "motor_index",
@@ -222,6 +222,35 @@
                     "description": "The index of the motor to delete the controller for."
                 }
             ],
+            "category": "Motor Controller"
+        },
+        {
+            "command": "SET_CONTROLLER_FREQUENCY",
+            "code": "0x0A",
+            "description": "This command sets the global update frequency (in Hz) of the closed-loop motor controller task. All motor controllers share a single control loop, so this frequency is global and affects every currently running controller as well as any created afterwards; the PID sampling time is updated to match. The requested value is clamped to the supported range of 1 to 1000 Hz (the 1000 Hz maximum is bounded by the 1 ms RTOS tick). The value is then quantized to the 1 ms RTOS tick (period_ms = 1000 / frequency), so effective frequencies are 1000/N Hz. A value of 0 is invalid and ignored. Defaults to 10 Hz (100 ms) at start-up.",
+            "properties": [
+                {
+                    "name": "frequency",
+                    "type": "uint16_t",
+                    "range": [
+                        1,
+                        1000
+                    ],
+                    "description": "The controller update frequency in Hz. Valid range 1 to 1000 Hz; values outside are clamped, and 0 is ignored."
+                }
+            ],
+            "category": "Motor Controller"
+        },
+        {
+            "command": "GET_CONTROLLER_FREQUENCY",
+            "code": "0x0B",
+            "description": "This command retrieves the current global update frequency (in Hz) of the closed-loop motor controller task.",
+            "properties": [],
+            "response": {
+                "name": "frequency",
+                "type": "uint16_t",
+                "description": "The current controller update frequency in Hz (1 to 1000 Hz)."
+            },
             "category": "Motor Controller"
         },
         {
@@ -348,6 +377,35 @@
             "category": "Encoder"
         },
         {
+            "command": "SET_ODOMETRY_FREQUENCY",
+            "code": "0x17",
+            "description": "This command sets the global update frequency (in Hz) of the odometry task. A single odometry task integrates all encoder and platform odometry, so this frequency is global. The requested value is clamped to the supported range of 1 to 1000 Hz (the 1000 Hz maximum is bounded by the 1 ms RTOS tick). The value is then quantized to the 1 ms RTOS tick (period_ms = 1000 / frequency), so effective frequencies are 1000/N Hz. A value of 0 is invalid and ignored. Defaults to 20 Hz (50 ms) at start-up.",
+            "properties": [
+                {
+                    "name": "frequency",
+                    "type": "uint16_t",
+                    "range": [
+                        1,
+                        1000
+                    ],
+                    "description": "The odometry update frequency in Hz. Valid range 1 to 1000 Hz; values outside are clamped, and 0 is ignored."
+                }
+            ],
+            "category": "Encoder"
+        },
+        {
+            "command": "GET_ODOMETRY_FREQUENCY",
+            "code": "0x18",
+            "description": "This command retrieves the current global update frequency (in Hz) of the odometry task.",
+            "properties": [],
+            "response": {
+                "name": "frequency",
+                "type": "uint16_t",
+                "description": "The current odometry update frequency in Hz (1 to 1000 Hz)."
+            },
+            "category": "Encoder"
+        },
+        {
             "command": "INITIALIZE_GPIO_PIN",
             "code": "0x20",
             "description": "This command initializes a digital pin and prepares it for use.",
@@ -437,7 +495,7 @@
         {
             "command": "INITIALIZE_MECANUM_PLATFORM",
             "code": "0x30",
-            "description": "This command initializes a mecanum platform and prepares it for use.",
+            "description": "This command initializes a mecanum (4-wheel) platform and prepares it for use. It uses motor and encoder indices 0, 1, 2 and 3 (one per wheel), which correspond to the is_reversed_0..3 and is_encoder_reversed_0..3 parameters. All four motor slots are occupied by this platform.",
             "properties": [
                 {
                     "name": "is_reversed_0",
@@ -517,7 +575,7 @@
         {
             "command": "INITIALIZE_OMNI_PLATFORM",
             "code": "0x31",
-            "description": "This command initializes a omni platform and prepares it for use.",
+            "description": "This command initializes an omni (3-wheel) platform and prepares it for use. It uses motor and encoder indices 0, 1 and 2 (one per wheel), which correspond to the is_reversed_0..2 and is_encoder_reversed_0..2 parameters. Motor index 3 is not used by this platform and stays free for other purposes.",
             "properties": [
                 {
                     "name": "is_reversed_0",
@@ -579,7 +637,7 @@
         {
             "command": "INITIALIZE_DIFFERENTIAL_PLATFORM",
             "code": "0x32",
-            "description": "This command initializes a differential platform and prepares it for use.",
+            "description": "This command initializes a differential (2-wheel) platform and prepares it for use. It uses motor and encoder index 0 for the left wheel and index 1 for the right wheel, which correspond to the is_reversed_0/1 and is_encoder_reversed_0/1 parameters. Motor indices 2 and 3 are not used by this platform and stay free for other purposes.",
             "properties": [
                 {
                     "name": "is_reversed_0",
@@ -756,6 +814,18 @@
                 "type": "object",
                 "description": "The odometry of the platform in meters and radians."
             },
+            "category": "Platform"
+        },
+        {
+            "command": "BRAKE_PLATFORM",
+            "code": "0x49",
+            "description": "This command actively brakes all of this platform's wheel motors (short brake) so they resist motion and hold position, and stops the platform velocity controller if it is running (you must call START_PLATFORM_CONTROLLER again to resume closed-loop platform control). Motors used outside this platform are not affected. The motors resist motion until a new command is issued.",
+            "category": "Platform"
+        },
+        {
+            "command": "COAST_PLATFORM",
+            "code": "0x4A",
+            "description": "This command lets all of this platform's wheel motors coast freely (high impedance) so they spin down without resistance, and stops the platform velocity controller if it is running (you must call START_PLATFORM_CONTROLLER again to resume closed-loop platform control). Motors used outside this platform are not affected. The motors spin down without resistance.",
             "category": "Platform"
         }
     ],
