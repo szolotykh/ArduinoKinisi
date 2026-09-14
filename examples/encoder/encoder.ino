@@ -1,24 +1,32 @@
+// File: examples/encoder/encoder.ino
+// Read timestamped encoder odometry using controller uptime (no RTC required).
 #include <kinisi.h>
 
-KinisiController controller(8); // Initialize the Kinisi controller with the default address (8)
-uint8_t encoderIndex = 0; // Encoder index
+KinisiController controller(8);
+const uint8_t encoderIndex = 0;
 
+/** Complete INIT/READY, then initialize and start encoder odometry. */
 void setup() {
-  Serial.begin(9600);  // Initialize serial communication for debugging
-  controller.begin(); // Start the I2C communication
-
-  // Initialize the encoder
-  controller.initialize_encoder(encoderIndex);
+  Serial.begin(9600);
+  if (!controller.begin() ||
+      !controller.initialize_encoder(encoderIndex, 1000.0, false) ||
+      !controller.start_encoder_odometry(encoderIndex)) {
+    Serial.println("Initialization failed; check lastError(), wiring and firmware.");
+    while (true) delay(1000);
+  }
 }
 
+/** Publish only valid samples; the first sample may not be ready immediately. */
 void loop() {
-  // Get the encoder value from the Kinisi controller
-  uint32_t value = controller.get_encoder_value(encoderIndex);
-  Serial.println("Encoder value: " + String(value));
-
-  // Send toggle command to the Kinisi controller
-  controller.toggle_status_led_state();
-
-  // Wait for 1 second
-  delay(1000); 
-} 
+  encoder_odometry_sample sample = controller.get_encoder_odometry(encoderIndex);
+  if (controller.lastError().failure == KinisiFailure::NONE) {
+    // Arduino Print does not consistently support uint64_t, so show uptime seconds.
+    Serial.print("Acquired at controller uptime (seconds): ");
+    Serial.println(static_cast<unsigned long>(sample.timestamp_us / 1000000ULL));
+    Serial.print("Angle (radians): ");
+    Serial.println(sample.angle);
+  } else {
+    Serial.println("No valid odometry sample; inspect controller.lastError().");
+  }
+  delay(1000);
+}
