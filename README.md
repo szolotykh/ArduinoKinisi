@@ -4,6 +4,11 @@ Discription of the motor controller commands can be find here: [Kinisi Motion Co
 Follow Arduino library installation instructions to install this library manually: [Installing Libraries](https://docs.arduino.cc/software/ide-v1/tutorials/installing-libraries)\
 *Note: This library is not compatible with only 3.3V Arduino boards.*
 
+API **2.0.0 is incompatible with API v1**. `begin()` now completes INIT/READY and
+returns success. Arduino advertises no wall-clock capability; odometry timestamps
+are controller uptime in microseconds. See [protocol details](docs/protocol-v2.md)
+for errors, response types, and Wire buffer requirements.
+
 ## Examples
 Below is the example of using this library to control the status LED on the kinisi motion controller:
 
@@ -15,12 +20,17 @@ bool ledState = false; // To keep track of the LED state
 KinisiController controller(8); // Initialize the Kinisi controller with the default address (8)
 
 void setup() {
-  controller.begin(); // Start the I2C communication
+  if (!controller.begin()) {
+    while (true) delay(1000); // Initialization failed.
+  }
   pinMode(ledPin, OUTPUT); // Initialize the LED pin as an output
 }
 
 void loop() {
-  controller.toggle_status_led_state(); // Send toggle command to the Kinisi controller
+  if (!controller.toggle_status_led_state()) {
+    delay(1000);
+    return; // Inspect controller.lastError().
+  }
   
   ledState = !ledState; // Invert LED state
   digitalWrite(ledPin, ledState ? HIGH : LOW); // Update LED state
@@ -32,10 +42,10 @@ Examples can be found in [examples](examples) folder.
 ## Updating library
 To update the library, run the following python script:
 ```bash
-cd ./tools
-python update_commands.py
+python tools/update-commands.py --schema ../kinisi-motor-controller-firmware/commands.json
 ```
-This script automatically downloads the latest version of the kinisi motion controller commands from firmware repository and generates the library code based on ```commands.json``` file.
+The schema is explicit so regeneration cannot silently switch protocol versions.
+Use `--branch <firmware-branch>` instead to download a selected firmware schema.
 
 ## Links
 - [Kinisi Motion Controller firmware](https://github.com/szolotykh/kinisi-motor-controller-firmware)
