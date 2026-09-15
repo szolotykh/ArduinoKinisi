@@ -4,7 +4,7 @@ Discription of the motor controller commands can be find here: [Kinisi Motion Co
 Follow Arduino library installation instructions to install this library manually: [Installing Libraries](https://docs.arduino.cc/software/ide-v1/tutorials/installing-libraries)\
 *Note: This library is not compatible with only 3.3V Arduino boards.*
 
-API **2.0.0 is incompatible with API v1**. `begin()` now completes INIT/READY and
+API **2.1.0 is incompatible with API v1**. `begin()` now completes INIT/READY and
 returns success. Arduino advertises no wall-clock capability; odometry timestamps
 are controller uptime in microseconds. See [protocol details](docs/protocol-v2.md)
 for errors, response types, and Wire buffer requirements.
@@ -27,6 +27,10 @@ void setup() {
 }
 
 void loop() {
+  if (!controller.poll()) return;
+  static uint32_t toggled = 0;
+  if (uint32_t(millis() - toggled) < 1000) return;
+  toggled = millis();
   if (!controller.toggle_status_led_state()) {
     delay(1000);
     return; // Inspect controller.lastError().
@@ -34,8 +38,7 @@ void loop() {
   
   ledState = !ledState; // Invert LED state
   digitalWrite(ledPin, ledState ? HIGH : LOW); // Update LED state
-  delay(1000); // Wait for 1 second
-} 
+}
 ```
 Examples can be found in [examples](examples) folder.
 

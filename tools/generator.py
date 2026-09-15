@@ -3,11 +3,16 @@
 import argparse
 import json
 from pathlib import Path
+import re
 
 SIZES = {'bool': 1, 'uint8_t': 1, 'int8_t': 1, 'uint16_t': 2, 'int16_t': 2,
          'uint32_t': 4, 'int32_t': 4, 'uint64_t': 8, 'int64_t': 8, 'double': 8}
 INTERNAL = {'INIT', 'TIME_SYNC_RESPONSE'}
 HEADER = '// Generated from tools/commands.json; edit the schema or generator instead.\n'
+# Keep dependencies of the handwritten session while allowing new schema commands.
+SESSION_COMMANDS = {'PING', 'SET_HEARTBEAT_CONFIG', 'SUBSCRIBE_ODOMETRY',
+                    'UNSUBSCRIBE_ODOMETRY', 'ENCODER_ODOMETRY_EVENT',
+                    'PLATFORM_ODOMETRY_EVENT', 'POLL_TELEMETRY'}
 
 
 def public_commands(schema):
@@ -24,8 +29,12 @@ def response_type(command):
 
 def generate(schema, output):
     """Validate schema types and emit deterministic headers, methods and Arduino keywords."""
-    if schema['version'] != '2.0.0':
-        raise ValueError('This runtime supports protocol 2.0.0')
+    version = schema.get('version')
+    if not isinstance(version, str) or not re.fullmatch(r'2\.\d+\.\d+', version):
+        raise ValueError('This runtime requires a protocol 2.x.x schema')
+    missing = SESSION_COMMANDS - {c.get('command') for c in schema.get('commands', [])}
+    if missing:
+        raise ValueError('Schema is missing runtime commands: ' + ', '.join(sorted(missing)))
     objects = {o['name']: o for o in schema['objects']}
     for c in schema['commands']:
         if c.get('direction') not in ('client_to_controller', 'controller_to_client'):
@@ -86,6 +95,7 @@ def generate(schema, output):
             source.append(f'    return request(KINISI_{c["command"]}, payload, {n}, nullptr, 0);\n}}\n')
     header.append('};\n#endif\n')
     keywords = '# Generated Arduino syntax map.\nKinisiController\tKEYWORD1\nbegin\tKEYWORD2\nready\tKEYWORD2\nboardInfo\tKEYWORD2\nlastError\tKEYWORD2\n'
+    keywords += 'poll\tKEYWORD2\ngetSubscribedEncoderOdometry\tKEYWORD2\ngetSubscribedPlatformOdometry\tKEYWORD2\n'
     keywords += ''.join(c['command'].lower() + '\tKEYWORD2\n' for c in public_commands(schema))
     output.mkdir(parents=True, exist_ok=True)
     for name, content in [('kinisi_types.h', ''.join(types)), ('kinisi.h', ''.join(header)), ('kinisi.cpp', ''.join(source)), ('keywords.txt', keywords)]:

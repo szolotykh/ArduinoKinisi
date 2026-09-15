@@ -1,14 +1,13 @@
 # Arduino API v2
 
-Call `bool begin(uint32_t timeout_ms = 1000)` before commands. It starts Wire,
-identifies the SDK as Arduino 2.0.0, reads the controller identity, and waits for
+Call `begin(timeout_ms=1000, heartbeat_timeout_ms=500)` before commands. It starts Wire,
+identifies the SDK as Arduino 2.1.0, reads the controller identity, and waits for
 READY. `boardInfo()` exposes hardware revision, protocol version and firmware Git
 build identity; `ready()` reports session readiness.
 
-This release advertises **no wall-clock or subscription capability**. The board
-uses uptime and skips time-sync exchanges, including periodic sync. There is no
-background task to run from `loop()`. A future RTC-enabled client will need a
-clock provider and an event-polling API before it can advertise wall time.
+The SDK advertises subscription support and **no wall-clock capability**. The board
+uses uptime and skips time-sync exchanges, including periodic sync. Call `poll()`
+frequently from `loop()` to service [heartbeat and subscriptions](connection-monitoring.md).
 `get_time_status()` reports the selected mode and default 30,000-ms interval;
 changing that interval does not enable wall-clock sync in an uptime session.
 

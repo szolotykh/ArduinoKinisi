@@ -29,5 +29,5 @@ void setup() {
     if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(clock.clock_mode);
 }
 
-/** The compile-check sketch performs no periodic robot operations. */
-void loop() { delay(1000); }
+/** Compile the cooperative heartbeat service without enabling motors. */
+void loop() { controller.poll(); }

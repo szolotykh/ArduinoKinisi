@@ -20,5 +20,5 @@ void setup() {
   Serial.println("Odometry frequency: " + String(odometryFrequency) + " Hz");
 }
 
-/** Configuration runs once; no periodic messages are needed in uptime mode. */
-void loop() { delay(1000); }
+/** Continue servicing the connection watchdog independently of uptime timestamps. */
+void loop() { controller.poll(); }

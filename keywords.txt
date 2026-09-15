@@ -4,6 +4,9 @@ begin	KEYWORD2
 ready	KEYWORD2
 boardInfo	KEYWORD2
 lastError	KEYWORD2
+poll	KEYWORD2
+getSubscribedEncoderOdometry	KEYWORD2
+getSubscribedPlatformOdometry	KEYWORD2
 initialize_motor	KEYWORD2
 set_motor_speed	KEYWORD2
 stop_motor	KEYWORD2
@@ -45,3 +48,9 @@ brake_platform	KEYWORD2
 coast_platform	KEYWORD2
 set_time_sync_interval	KEYWORD2
 get_time_status	KEYWORD2
+ping	KEYWORD2
+set_heartbeat_config	KEYWORD2
+get_heartbeat_config	KEYWORD2
+subscribe_odometry	KEYWORD2
+unsubscribe_odometry	KEYWORD2
+poll_telemetry	KEYWORD2

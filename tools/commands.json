@@ -1,5 +1,5 @@
 {
-    "version": "2.0.0",
+    "version": "2.1.0",
     "commands": [
         {
             "command": "INITIALIZE_MOTOR",
@@ -28,7 +28,8 @@
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
                 "INTERNAL_ERROR",
-                "MOTOR_OWNED"
+                "MOTOR_OWNED",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -62,7 +63,8 @@
                 "INVALID_ARGUMENT",
                 "INTERNAL_ERROR",
                 "MOTOR_OWNED",
-                "MOTOR_NOT_INITIALIZED"
+                "MOTOR_NOT_INITIALIZED",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -180,7 +182,8 @@
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
                 "INTERNAL_ERROR",
-                "MOTOR_OWNED"
+                "MOTOR_OWNED",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -210,7 +213,8 @@
                 "INVALID_ARGUMENT",
                 "INTERNAL_ERROR",
                 "MOTOR_OWNED",
-                "CONTROLLER_NOT_INITIALIZED"
+                "CONTROLLER_NOT_INITIALIZED",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -234,7 +238,8 @@
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
                 "INTERNAL_ERROR",
-                "MOTOR_OWNED"
+                "MOTOR_OWNED",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -262,7 +267,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -286,7 +292,8 @@
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
                 "INTERNAL_ERROR",
-                "MOTOR_OWNED"
+                "MOTOR_OWNED",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -309,7 +316,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -328,7 +336,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -362,7 +371,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -392,7 +402,8 @@
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
                 "INTERNAL_ERROR",
-                "ENCODER_NOT_INITIALIZED"
+                "ENCODER_NOT_INITIALIZED",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -441,7 +452,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -464,7 +476,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -504,7 +517,7 @@
             "command": "SET_ODOMETRY_FREQUENCY",
             "code": "0x17",
             "direction": "client_to_controller",
-            "description": "This command sets the global update frequency (in Hz) of the odometry task. A single odometry task integrates all encoder and platform odometry, so this frequency is global. The requested value is clamped to the supported range of 1 to 1000 Hz (the 1000 Hz maximum is bounded by the 1 ms RTOS tick). The value is then quantized to the 1 ms RTOS tick (period_ms = 1000 / frequency), so effective frequencies are 1000/N Hz. A value of 0 is invalid and ignored. Defaults to 20 Hz (50 ms) at start-up.",
+            "description": "This command sets the global update frequency (in Hz) of the odometry task. A single odometry task integrates all encoder and platform odometry, so this frequency is global. The requested value is clamped to the supported range of 1 to 1000 Hz (the 1000 Hz maximum is bounded by the 1 ms RTOS tick). The value is then quantized to the 1 ms RTOS tick (period_ms = 1000 / frequency), so effective frequencies are 1000/N Hz. A value of 0 is invalid and ignored. Defaults to 20 Hz (50 ms) at start-up. Rejected if the resulting calculation period exceeds half of any active subscription interval on either transport.",
             "properties": [
                 {
                     "name": "frequency",
@@ -520,7 +533,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -539,7 +553,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -563,7 +578,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -587,7 +603,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -612,7 +629,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -631,7 +649,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -650,7 +669,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -663,7 +683,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -749,7 +770,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -817,7 +839,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -873,7 +896,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -915,7 +939,8 @@
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
                 "INTERNAL_ERROR",
-                "PLATFORM_NOT_INITIALIZED"
+                "PLATFORM_NOT_INITIALIZED",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -950,7 +975,8 @@
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
                 "INTERNAL_ERROR",
-                "PLATFORM_NOT_INITIALIZED"
+                "PLATFORM_NOT_INITIALIZED",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -981,7 +1007,8 @@
                 "INVALID_ARGUMENT",
                 "INTERNAL_ERROR",
                 "PLATFORM_NOT_INITIALIZED",
-                "CONTROLLER_NOT_INITIALIZED"
+                "CONTROLLER_NOT_INITIALIZED",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -999,7 +1026,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -1038,7 +1066,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -1050,7 +1079,8 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
             ]
         },
         {
@@ -1267,7 +1297,221 @@
             "errors": [
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
+            ]
+        },
+        {
+            "command": "PING",
+            "code": "0x76",
+            "direction": "client_to_controller",
+            "category": "Connection",
+            "description": "Refresh connection activity and receive an empty ACK. Any structurally valid client command also refreshes activity; malformed frames do not.",
+            "properties": [],
+            "errors": [
+                "INVALID_LENGTH",
+                "INVALID_ARGUMENT",
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
+            ]
+        },
+        {
+            "command": "SET_HEARTBEAT_CONFIG",
+            "code": "0x77",
+            "direction": "client_to_controller",
+            "category": "Connection",
+            "description": "Configure this session watchdog after READY. Timeout coasts all motors, clears subscriptions and requires a new INIT before further operations. Disabling also removes this session subscriptions. INIT resets to disabled, 500 ms.",
+            "properties": [
+                {
+                    "name": "enabled",
+                    "type": "bool",
+                    "description": "Enable monitoring; disabled initially for compatibility."
+                },
+                {
+                    "name": "timeout_ms",
+                    "type": "uint32_t",
+                    "description": "Monotonic receive timeout. Default 500 ms; send PING after at most timeout/5 of idle time (100 ms with the default).",
+                    "range": [
+                        100,
+                        60000
+                    ]
+                }
+            ],
+            "errors": [
+                "INVALID_LENGTH",
+                "INVALID_ARGUMENT",
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED",
+                "CLOCK_NOT_READY"
+            ]
+        },
+        {
+            "command": "GET_HEARTBEAT_CONFIG",
+            "code": "0x78",
+            "direction": "client_to_controller",
+            "category": "Connection",
+            "description": "Read this session watchdog configuration.",
+            "properties": [],
+            "errors": [
+                "INVALID_LENGTH",
+                "INVALID_ARGUMENT",
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
+            ],
+            "response": {
+                "name": "value",
+                "type": "heartbeat_config",
+                "description": "Read this session watchdog configuration.",
+                "direction": "controller_to_client"
+            }
+        },
+        {
+            "command": "SUBSCRIBE_ODOMETRY",
+            "code": "0x79",
+            "direction": "client_to_controller",
+            "category": "Connection",
+            "description": "Publish the latest completed sample using the requested scheduling interval without rounding it to calculation ticks. Delivery is subject to transport capacity and task scheduling. Requires READY, an enabled heartbeat and running odometry. Replaces an existing subscription for this source. Interval must be at least twice the calculation period. No renewal is needed. Stop/reset of calculation pauses samples until fresh measurements exist; unsubscribe, INIT, disconnect or watchdog timeout removes subscriptions.",
+            "properties": [
+                {
+                    "name": "source",
+                    "type": "uint8_t",
+                    "description": "0 through 3 select encoder odometry; 4 selects platform odometry.",
+                    "range": [
+                        0,
+                        4
+                    ]
+                },
+                {
+                    "name": "interval_ms",
+                    "type": "uint32_t",
+                    "description": "Delivery interval, independent of calculation scheduling.",
+                    "range": [
+                        2,
+                        3600000
+                    ]
+                }
+            ],
+            "errors": [
+                "INVALID_LENGTH",
+                "INVALID_ARGUMENT",
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED",
+                "CLOCK_NOT_READY",
+                "ODOMETRY_NOT_INITIALIZED"
+            ]
+        },
+        {
+            "command": "UNSUBSCRIBE_ODOMETRY",
+            "code": "0x7a",
+            "direction": "client_to_controller",
+            "category": "Connection",
+            "description": "Remove this source subscription; succeeds if already absent. Does not stop odometry calculation.",
+            "properties": [
+                {
+                    "name": "source",
+                    "type": "uint8_t",
+                    "description": "0 through 3 select encoder odometry; 4 selects platform odometry.",
+                    "range": [
+                        0,
+                        4
+                    ]
+                }
+            ],
+            "errors": [
+                "INVALID_LENGTH",
+                "INVALID_ARGUMENT",
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED"
+            ]
+        },
+        {
+            "command": "ENCODER_ODOMETRY_EVENT",
+            "code": "0x7b",
+            "direction": "controller_to_client",
+            "category": "Connection",
+            "description": "Unsolicited latest encoder sample, message_id zero. No response is expected. Slow transports skip intermediate samples rather than queueing stale history.",
+            "properties": [
+                {
+                    "name": "encoder_index",
+                    "type": "uint8_t",
+                    "description": "Encoder index."
+                },
+                {
+                    "name": "timestamp_us",
+                    "type": "uint64_t",
+                    "description": "Measurement timestamp in selected clock domain."
+                },
+                {
+                    "name": "clock_mode",
+                    "type": "uint8_t",
+                    "description": "0 uptime, 1 Unix wall time."
+                },
+                {
+                    "name": "clock_quality",
+                    "type": "uint8_t",
+                    "description": "1 valid, 2 stale."
+                },
+                {
+                    "name": "angle",
+                    "type": "double",
+                    "description": "Encoder odometry radians."
+                }
+            ],
+            "errors": []
+        },
+        {
+            "command": "PLATFORM_ODOMETRY_EVENT",
+            "code": "0x7c",
+            "direction": "controller_to_client",
+            "category": "Connection",
+            "description": "Unsolicited latest platform sample, message_id zero. No response is expected. Timestamp is the measurement time, not the transmission time.",
+            "properties": [
+                {
+                    "name": "timestamp_us",
+                    "type": "uint64_t",
+                    "description": "Measurement timestamp in selected clock domain."
+                },
+                {
+                    "name": "clock_mode",
+                    "type": "uint8_t",
+                    "description": "0 uptime, 1 Unix wall time."
+                },
+                {
+                    "name": "clock_quality",
+                    "type": "uint8_t",
+                    "description": "1 valid, 2 stale."
+                },
+                {
+                    "name": "x",
+                    "type": "double",
+                    "description": "X meters."
+                },
+                {
+                    "name": "y",
+                    "type": "double",
+                    "description": "Y meters."
+                },
+                {
+                    "name": "t",
+                    "type": "double",
+                    "description": "Heading radians."
+                }
+            ],
+            "errors": []
+        },
+        {
+            "command": "POLL_TELEMETRY",
+            "code": "0x7d",
+            "direction": "client_to_controller",
+            "category": "Connection",
+            "description": "I2C master service request. Allows at most one due odometry event before its empty ACK, so the master can clock out telemetry without waiting indefinitely when no sample is available. USB clients receive events automatically and do not need this command.",
+            "properties": [],
+            "errors": [
+                "INVALID_LENGTH",
+                "INVALID_ARGUMENT",
+                "INTERNAL_ERROR",
+                "INIT_REQUIRED",
+                "CLOCK_NOT_READY"
             ]
         }
     ],
@@ -1496,6 +1740,26 @@
                     "name": "t",
                     "type": "double",
                     "description": "Heading radians."
+                }
+            ]
+        },
+        {
+            "name": "heartbeat_config",
+            "description": "Per-connection watchdog settings.",
+            "properties": [
+                {
+                    "name": "enabled",
+                    "type": "bool",
+                    "description": "Enable monitoring; disabled initially for compatibility."
+                },
+                {
+                    "name": "timeout_ms",
+                    "type": "uint32_t",
+                    "description": "Monotonic receive timeout. Default 500 ms; send PING after at most timeout/5 of idle time (100 ms with the default).",
+                    "range": [
+                        100,
+                        60000
+                    ]
                 }
             ]
         }
