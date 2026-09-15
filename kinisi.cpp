@@ -379,3 +379,49 @@ time_status KinisiController::get_time_status() {
     result.last_sync_age_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(response + 6, 8));
     return result;
 }
+
+/** Encode PING, match its reply, and decode the payload. */
+bool KinisiController::ping() {
+    uint8_t payload[1] = {0};
+    return request(KINISI_PING, payload, 0, nullptr, 0);
+}
+
+/** Encode SET_HEARTBEAT_CONFIG, match its reply, and decode the payload. */
+bool KinisiController::set_heartbeat_config(bool enabled, uint32_t timeout_ms) {
+    uint8_t payload[5] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(enabled), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(timeout_ms), 4);
+    return request(KINISI_SET_HEARTBEAT_CONFIG, payload, 5, nullptr, 0);
+}
+
+/** Encode GET_HEARTBEAT_CONFIG, match its reply, and decode the payload. */
+heartbeat_config KinisiController::get_heartbeat_config() {
+    uint8_t payload[1] = {0};
+    heartbeat_config result = {};
+    uint8_t response[5] = {0};
+    if (!request(KINISI_GET_HEARTBEAT_CONFIG, payload, 0, response, 5)) return result;
+    result.enabled = static_cast<bool>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.timeout_ms = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 1, 4));
+    return result;
+}
+
+/** Encode SUBSCRIBE_ODOMETRY, match its reply, and decode the payload. */
+bool KinisiController::subscribe_odometry(uint8_t source, uint32_t interval_ms) {
+    uint8_t payload[5] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(source), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(interval_ms), 4);
+    return request(KINISI_SUBSCRIBE_ODOMETRY, payload, 5, nullptr, 0);
+}
+
+/** Encode UNSUBSCRIBE_ODOMETRY, match its reply, and decode the payload. */
+bool KinisiController::unsubscribe_odometry(uint8_t source) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(source), 1);
+    return request(KINISI_UNSUBSCRIBE_ODOMETRY, payload, 1, nullptr, 0);
+}
+
+/** Encode POLL_TELEMETRY, match its reply, and decode the payload. */
+bool KinisiController::poll_telemetry() {
+    uint8_t payload[1] = {0};
+    return request(KINISI_POLL_TELEMETRY, payload, 0, nullptr, 0);
+}

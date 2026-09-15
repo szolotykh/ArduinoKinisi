@@ -7,6 +7,8 @@ extern "C" {
 void bridge_reset(void);
 void bridge_send(const uint8_t*, size_t);
 size_t bridge_read(uint8_t*);
+void bridge_advance(uint32_t);
+unsigned bridge_stops(void);
 }
 TwoWire Wire;
 MockSerial Serial;
@@ -36,5 +38,17 @@ int main() {
     assert(c.get_time_status().interval_ms==10000);
     assert(c.begin());
     assert(c.get_time_status().interval_ms==30000);
+    assert(c.subscribe_odometry(0,100));
+    bridge_advance(100000); fake_millis += 100;
+    assert(c.poll());
+    encoder_odometry_sample sample;
+    assert(c.getSubscribedEncoderOdometry(0,sample));
+    assert(sample.clock_mode == 0 && sample.angle == 1.25 && sample.timestamp_us % 20000 == 0);
+    assert(c.unsubscribe_odometry(0));
+    assert(!c.getSubscribedEncoderOdometry(0,sample));
+    unsigned previous = bridge_stops();
+    bridge_advance(500000); fake_millis += 500;
+    assert(!c.poll() && !c.ready());
+    assert(bridge_stops() == previous + 1 && c.lastError().code == KinisiErrorCode::INIT_REQUIRED);
     puts("PASS Arduino SDK interoperates with production C firmware INIT, READY, ACK, ERROR and clock status");
 }

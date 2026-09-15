@@ -22,8 +22,14 @@ class KinisiProtocol {
 public:
     /** Create an inactive session. Request IDs persist across begin() calls. */
     explicit KinisiProtocol(uint8_t address);
-    /** Start Wire, advertise Arduino SDK 2.0.0 without wall time, and await INIT + READY. */
-    bool begin(uint32_t timeout_ms = 1000);
+    /** Await uptime INIT/READY and enable heartbeat; pass zero to opt out of monitoring. */
+    bool begin(uint32_t timeout_ms = 1000, uint32_t heartbeat_timeout_ms = 500);
+    /** Call frequently from loop(): drain due telemetry and send PING only after idle. */
+    bool poll();
+    /** Copy the latest streamed encoder measurement; false until a sample is available. */
+    bool getSubscribedEncoderOdometry(uint8_t index, encoder_odometry_sample& sample) const;
+    /** Copy the latest streamed platform measurement; false until a sample is available. */
+    bool getSubscribedPlatformOdometry(platform_odometry_sample& sample) const;
     /** Whether the last handshake completed and transport remains usable. */
     bool ready() const { return ready_; }
     /** Board identity from the most recent successful INIT. */
@@ -41,6 +47,13 @@ private:
     bool ready_;
     init_response identity_;
     KinisiError error_;
+    uint32_t heartbeat_ms_, last_sent_ms_, last_poll_ms_;
+    uint32_t subscription_ms_[5];
+    uint8_t sample_mask_;
+    encoder_odometry_sample encoder_samples_[4];
+    platform_odometry_sample platform_sample_;
+    /** Validate and cache one unsolicited ID-zero telemetry frame. */
+    bool telemetry(const uint8_t* frame, uint8_t size);
     /** Set structured failure; fatal transport/protocol failures invalidate the session. */
     bool fail(KinisiFailure failure, uint8_t command, uint16_t id,
               KinisiErrorCode code = KinisiErrorCode::NONE);

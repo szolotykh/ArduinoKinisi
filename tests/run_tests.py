@@ -7,10 +7,44 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from copy import deepcopy
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from generator import generate
+
+
+def check_incompatible_schemas(schema, output):
+    """Ensure rejected schemas preserve every existing generated library file."""
+    names = ['kinisi.h', 'kinisi.cpp', 'kinisi_types.h', 'keywords.txt']
+    before = {name: (output / name).read_bytes() for name in names}
+    for version in ['1.4.0', '2.0.0', '3.0.0', None]:
+        incompatible = deepcopy(schema)
+        incompatible['version'] = version
+        if version == '2.0.0':
+            incompatible['commands'] = [c for c in incompatible['commands'] if c['command'] != 'PING']
+        try:
+            generate(incompatible, output)
+        except ValueError as error:
+            assert ('protocol 2.x.x' in str(error) or 'missing runtime commands: PING' in str(error)), error
+        else:
+            raise AssertionError(f'Accepted incompatible schema: {version}')
+        assert before == {name: (output / name).read_bytes() for name in names}
+    print('PASS incompatible schemas preserve generated library files', flush=True)
+
+
+def check_future_schemas(schema, output):
+    """New commands and minor/patch versions must not require editing the generator."""
+    for version in ['2.1.1', '2.2.0', '2.10.0']:
+        future = deepcopy(schema)
+        future['version'] = version
+        future['commands'].append({'command': 'GET_NEW_VALUE', 'code': '0x60',
+            'direction': 'client_to_controller', 'description': 'A future command.',
+            'response': {'name': 'value', 'type': 'uint16_t', 'direction': 'controller_to_client'}})
+        generate(future, output)
+        assert 'uint16_t get_new_value();' in (output / 'kinisi.h').read_text(encoding='utf-8')
+        assert 'KINISI_GET_NEW_VALUE = 0x60;' in (output / 'kinisi_types.h').read_text(encoding='utf-8')
+    print('PASS future schema versions and new commands', flush=True)
 
 
 def main():
@@ -25,6 +59,8 @@ def main():
         for name in ['kinisi.h','kinisi.cpp','kinisi_types.h','keywords.txt']:
             assert (out/name).read_bytes() == (ROOT/name).read_bytes(), f'Stale generated file: {name}'
         print('PASS deterministic schema regeneration', flush=True)
+        check_incompatible_schemas(schema, out)
+        check_future_schemas(schema, out / 'future')
         base = [compiler,'-std=c++11','-Wall','-Wextra','-Werror','-I'+str(ROOT/'tests/mocks'),'-I'+str(ROOT)]
         sources = [str(ROOT/p) for p in ['kinisi.cpp','kinisi_protocol.cpp','i2cutils.cpp','tests/test_protocol.cpp']]
         for capacity in [32,64]:

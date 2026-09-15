@@ -10,7 +10,8 @@ void setup() {
   Serial.begin(9600);
   if (!controller.begin() ||
       !controller.initialize_encoder(encoderIndex, 1000.0, false) ||
-      !controller.start_encoder_odometry(encoderIndex)) {
+      !controller.start_encoder_odometry(encoderIndex) ||
+      !controller.subscribe_odometry(encoderIndex, 100)) {
     Serial.println("Initialization failed; check lastError(), wiring and firmware.");
     while (true) delay(1000);
   }
@@ -18,8 +19,12 @@ void setup() {
 
 /** Publish only valid samples; the first sample may not be ready immediately. */
 void loop() {
-  encoder_odometry_sample sample = controller.get_encoder_odometry(encoderIndex);
-  if (controller.lastError().failure == KinisiFailure::NONE) {
+  if (!controller.poll()) return; // Service heartbeat and I2C telemetry without long delays.
+  static uint32_t printed = 0;
+  if (uint32_t(millis() - printed) < 1000) return;
+  printed = millis();
+  encoder_odometry_sample sample;
+  if (controller.getSubscribedEncoderOdometry(encoderIndex, sample)) {
     // Arduino Print does not consistently support uint64_t, so show uptime seconds.
     Serial.print("Acquired at controller uptime (seconds): ");
     Serial.println(static_cast<unsigned long>(sample.timestamp_us / 1000000ULL));
@@ -28,5 +33,4 @@ void loop() {
   } else {
     Serial.println("No valid odometry sample; inspect controller.lastError().");
   }
-  delay(1000);
 }

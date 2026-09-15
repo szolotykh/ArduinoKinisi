@@ -16,6 +16,10 @@ void setup() {
 
 /** Mirror the controller LED locally only when its command succeeds. */
 void loop() {
+  if (!controller.poll()) return;
+  static uint32_t toggled = 0;
+  if (uint32_t(millis() - toggled) < 1000) return;
+  toggled = millis();
   if (!controller.toggle_status_led_state()) {
     delay(1000);
     return; // Inspect lastError() before deciding whether to reconnect.
@@ -23,5 +27,4 @@ void loop() {
   
   ledState = !ledState; // Invert LED state
   digitalWrite(ledPin, ledState ? HIGH : LOW); // Update LED state
-  delay(1000); // Wait for 1 second
-} 
+}

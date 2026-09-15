@@ -48,6 +48,14 @@ static const uint8_t KINISI_TIME_SYNC_RESPONSE = 0x72;
 static const uint8_t KINISI_READY = 0x73;
 static const uint8_t KINISI_SET_TIME_SYNC_INTERVAL = 0x74;
 static const uint8_t KINISI_GET_TIME_STATUS = 0x75;
+static const uint8_t KINISI_PING = 0x76;
+static const uint8_t KINISI_SET_HEARTBEAT_CONFIG = 0x77;
+static const uint8_t KINISI_GET_HEARTBEAT_CONFIG = 0x78;
+static const uint8_t KINISI_SUBSCRIBE_ODOMETRY = 0x79;
+static const uint8_t KINISI_UNSUBSCRIBE_ODOMETRY = 0x7a;
+static const uint8_t KINISI_ENCODER_ODOMETRY_EVENT = 0x7b;
+static const uint8_t KINISI_PLATFORM_ODOMETRY_EVENT = 0x7c;
+static const uint8_t KINISI_POLL_TELEMETRY = 0x7d;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -132,5 +140,11 @@ struct platform_odometry_sample {
     double x; ///< X meters.
     double y; ///< Y meters.
     double t; ///< Heading radians.
+};
+
+/** Per-connection watchdog settings. */
+struct heartbeat_config {
+    bool enabled; ///< Enable monitoring; disabled initially for compatibility.
+    uint32_t timeout_ms; ///< Monotonic receive timeout. Default 500 ms; send PING after at most timeout/5 of idle time (100 ms with the default).
 };
 #endif

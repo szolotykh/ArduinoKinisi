@@ -7,10 +7,19 @@
 
 static connection_t connection;
 static uint64_t now_us;
+static unsigned stops;
 static uint8_t replies[8][256], lengths[8], head, tail;
 
 /** Supply deterministic controller uptime to the production session. */
 static uint64_t now(void) { return now_us; }
+/** Supply a 20 ms background sampling interval to production subscription validation. */
+static uint32_t period(void) { return 20; }
+/** Observe the safety callback without accessing physical motors. */
+static void stop(void) { ++stops; }
+/** Advance monotonic time before the next serialized command task turn. */
+void bridge_advance(uint32_t us) { now_us += us; }
+/** Return how many connection losses invoked the motor-stop hook. */
+unsigned bridge_stops(void) { return stops; }
 /** Capture one complete firmware frame without changing its wire representation. */
 static bool capture(uint8_t* bytes, uint8_t length) {
     assert(tail < 8);
@@ -34,13 +43,21 @@ static uint8_t handle(controller_command_t* cmd, protocol_send_fn reply) {
         return RESPONSE_OK;
     }
     if (cmd->commandType == GET_PLATFORM_ODOMETRY) return RESPONSE_ODOMETRY_NOT_INITIALIZED;
+    if (cmd->commandType == GET_ENCODER_ODOMETRY) {
+        encoder_odometry_sample sample = {now_us / 20000 * 20000, 0, 1, 1.25};
+        reply((uint8_t *)&sample, sizeof(sample));
+        return RESPONSE_OK;
+    }
     return RESPONSE_UNKNOWN_COMMAND;
 }
 /** Start a fresh production firmware session. */
 void bridge_reset(void) {
     head = tail = 0;
     now_us = 1000000;
+    stops = 0;
     connection_init(&connection, handle, capture, now);
+    connection.services.stop = stop;
+    connection.services.calculation_period_ms = period;
 }
 /** Feed a complete master write and advance the firmware command task. */
 void bridge_send(const uint8_t* data, size_t length) {
