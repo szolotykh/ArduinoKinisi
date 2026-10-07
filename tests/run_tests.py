@@ -48,7 +48,7 @@ def check_future_schemas(schema, output):
 
 
 def main():
-    """Build both common Wire capacities, run protocol tests and syntax-check examples."""
+    """Test Wire capacities, firmware interoperability and example syntax."""
     compiler = os.environ.get('CXX') or shutil.which('g++')
     if not compiler:
         raise SystemExit('Set CXX to a C++11 compiler')
@@ -57,7 +57,7 @@ def main():
         out = Path(folder)
         generate(schema, out)
         for name in ['kinisi.h','kinisi.cpp','kinisi_types.h','keywords.txt']:
-            assert (out/name).read_bytes() == (ROOT/name).read_bytes(), f'Stale generated file: {name}'
+            assert (out/name).read_text(encoding='utf-8') == (ROOT/name).read_text(encoding='utf-8'), f'Stale generated file: {name}'
         print('PASS deterministic schema regeneration', flush=True)
         check_incompatible_schemas(schema, out)
         check_future_schemas(schema, out / 'future')
