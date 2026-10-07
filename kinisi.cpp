@@ -34,6 +34,7 @@ bool KinisiController::brake_motor(uint8_t motor_index) {
 
 /** Encode INITIALIZE_MOTOR_CONTROLLER, match its reply, and decode the payload. */
 bool KinisiController::initialize_motor_controller(uint8_t motor_index, bool is_reversed, uint8_t encoder_index, bool is_encoder_reversed, double encoder_resolution, double kp, double ki, double kd, double integral_limit) {
+    if (!validateVelocityTuning(KINISI_INITIALIZE_MOTOR_CONTROLLER, kp, ki, kd, integral_limit)) return false;
     uint8_t payload[44] = {0};
     kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(motor_index), 1);
     kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(is_reversed), 1);
@@ -280,6 +281,7 @@ bool KinisiController::set_platform_velocity(double x, double y, double t) {
 
 /** Encode START_PLATFORM_CONTROLLER, match its reply, and decode the payload. */
 bool KinisiController::start_platform_controller(double kp, double ki, double kd, double integral_limit) {
+    if (!validateVelocityTuning(KINISI_START_PLATFORM_CONTROLLER, kp, ki, kd, integral_limit)) return false;
     uint8_t payload[32] = {0};
     kinisi_codec::writeDouble(payload + 0, kp);
     kinisi_codec::writeDouble(payload + 8, ki);
@@ -424,4 +426,98 @@ bool KinisiController::unsubscribe_odometry(uint8_t source) {
 bool KinisiController::poll_telemetry() {
     uint8_t payload[1] = {0};
     return request(KINISI_POLL_TELEMETRY, payload, 0, nullptr, 0);
+}
+
+/** Encode INITIALIZE_MOTOR_POSITION_CONTROLLER, match its reply, and decode the payload. */
+bool KinisiController::initialize_motor_position_controller(uint8_t motor_index, double kp, double max_speed, double tolerance) {
+    uint8_t payload[25] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(motor_index), 1);
+    kinisi_codec::writeDouble(payload + 1, kp);
+    kinisi_codec::writeDouble(payload + 9, max_speed);
+    kinisi_codec::writeDouble(payload + 17, tolerance);
+    return request(KINISI_INITIALIZE_MOTOR_POSITION_CONTROLLER, payload, 25, nullptr, 0);
+}
+
+/** Encode RESET_MOTOR_POSITION, match its reply, and decode the payload. */
+bool KinisiController::reset_motor_position(uint8_t motor_index) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(motor_index), 1);
+    return request(KINISI_RESET_MOTOR_POSITION, payload, 1, nullptr, 0);
+}
+
+/** Encode SET_MOTOR_POSITION, match its reply, and decode the payload. */
+bool KinisiController::set_motor_position(uint8_t motor_index, double position) {
+    uint8_t payload[9] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(motor_index), 1);
+    kinisi_codec::writeDouble(payload + 1, position);
+    return request(KINISI_SET_MOTOR_POSITION, payload, 9, nullptr, 0);
+}
+
+/** Encode GET_MOTOR_POSITION, match its reply, and decode the payload. */
+double KinisiController::get_motor_position(uint8_t motor_index) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(motor_index), 1);
+    double result = {};
+    uint8_t response[8] = {0};
+    if (!request(KINISI_GET_MOTOR_POSITION, payload, 1, response, 8)) return result;
+    result = kinisi_codec::readDouble(response);
+    return result;
+}
+
+/** Encode INITIALIZE_PLATFORM_POSITION_CONTROLLER, match its reply, and decode the payload. */
+bool KinisiController::initialize_platform_position_controller(double linear_kp, double angular_kp, double max_linear_speed, double max_angular_speed, double position_tolerance, double heading_tolerance) {
+    uint8_t payload[48] = {0};
+    kinisi_codec::writeDouble(payload + 0, linear_kp);
+    kinisi_codec::writeDouble(payload + 8, angular_kp);
+    kinisi_codec::writeDouble(payload + 16, max_linear_speed);
+    kinisi_codec::writeDouble(payload + 24, max_angular_speed);
+    kinisi_codec::writeDouble(payload + 32, position_tolerance);
+    kinisi_codec::writeDouble(payload + 40, heading_tolerance);
+    return request(KINISI_INITIALIZE_PLATFORM_POSITION_CONTROLLER, payload, 48, nullptr, 0);
+}
+
+/** Encode RESET_PLATFORM_POSITION, match its reply, and decode the payload. */
+bool KinisiController::reset_platform_position() {
+    uint8_t payload[1] = {0};
+    return request(KINISI_RESET_PLATFORM_POSITION, payload, 0, nullptr, 0);
+}
+
+/** Encode SET_PLATFORM_POSITION, match its reply, and decode the payload. */
+bool KinisiController::set_platform_position(double x, double y, double t) {
+    uint8_t payload[24] = {0};
+    kinisi_codec::writeDouble(payload + 0, x);
+    kinisi_codec::writeDouble(payload + 8, y);
+    kinisi_codec::writeDouble(payload + 16, t);
+    return request(KINISI_SET_PLATFORM_POSITION, payload, 24, nullptr, 0);
+}
+
+/** Encode INITIALIZE_MOTOR_POSITION_PID_CONTROLLER, match its reply, and decode the payload. */
+bool KinisiController::initialize_motor_position_pid_controller(uint8_t motor_index, double kp, double max_speed, double tolerance, double ki, double kd, double integral_limit) {
+    uint8_t payload[49] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(motor_index), 1);
+    kinisi_codec::writeDouble(payload + 1, kp);
+    kinisi_codec::writeDouble(payload + 9, max_speed);
+    kinisi_codec::writeDouble(payload + 17, tolerance);
+    kinisi_codec::writeDouble(payload + 25, ki);
+    kinisi_codec::writeDouble(payload + 33, kd);
+    kinisi_codec::writeDouble(payload + 41, integral_limit);
+    return request(KINISI_INITIALIZE_MOTOR_POSITION_PID_CONTROLLER, payload, 49, nullptr, 0);
+}
+
+/** Encode INITIALIZE_PLATFORM_POSITION_PID_CONTROLLER, match its reply, and decode the payload. */
+bool KinisiController::initialize_platform_position_pid_controller(double linear_kp, double angular_kp, double max_linear_speed, double max_angular_speed, double position_tolerance, double heading_tolerance, double linear_ki, double linear_kd, double linear_integral_limit, double angular_ki, double angular_kd, double angular_integral_limit) {
+    uint8_t payload[96] = {0};
+    kinisi_codec::writeDouble(payload + 0, linear_kp);
+    kinisi_codec::writeDouble(payload + 8, angular_kp);
+    kinisi_codec::writeDouble(payload + 16, max_linear_speed);
+    kinisi_codec::writeDouble(payload + 24, max_angular_speed);
+    kinisi_codec::writeDouble(payload + 32, position_tolerance);
+    kinisi_codec::writeDouble(payload + 40, heading_tolerance);
+    kinisi_codec::writeDouble(payload + 48, linear_ki);
+    kinisi_codec::writeDouble(payload + 56, linear_kd);
+    kinisi_codec::writeDouble(payload + 64, linear_integral_limit);
+    kinisi_codec::writeDouble(payload + 72, angular_ki);
+    kinisi_codec::writeDouble(payload + 80, angular_kd);
+    kinisi_codec::writeDouble(payload + 88, angular_integral_limit);
+    return request(KINISI_INITIALIZE_PLATFORM_POSITION_PID_CONTROLLER, payload, 96, nullptr, 0);
 }

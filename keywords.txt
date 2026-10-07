@@ -54,3 +54,12 @@ get_heartbeat_config	KEYWORD2
 subscribe_odometry	KEYWORD2
 unsubscribe_odometry	KEYWORD2
 poll_telemetry	KEYWORD2
+initialize_motor_position_controller	KEYWORD2
+reset_motor_position	KEYWORD2
+set_motor_position	KEYWORD2
+get_motor_position	KEYWORD2
+initialize_platform_position_controller	KEYWORD2
+reset_platform_position	KEYWORD2
+set_platform_position	KEYWORD2
+initialize_motor_position_pid_controller	KEYWORD2
+initialize_platform_position_pid_controller	KEYWORD2

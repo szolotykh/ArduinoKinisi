@@ -3,6 +3,7 @@
 #include "kinisi_protocol.h"
 #include "kinisi_codec.h"
 #include <string.h>
+#include <math.h>
 
 /** Initialize local state without starting any bus traffic. */
 KinisiProtocol::KinisiProtocol(uint8_t address)
@@ -34,13 +35,14 @@ bool KinisiProtocol::fail(KinisiFailure failure, uint8_t command, uint16_t id, K
 /** Check all limits before sending; a rejected oversized command has no side effects. */
 bool KinisiProtocol::send(uint8_t command, uint16_t id, const uint8_t* payload,
                           uint8_t length, uint8_t response_length) {
-    // Every generated v2 request and response fits a 64-byte scratch buffer.
+    // Platform position PID uses a 100-byte request. Never split a frame;
+    // both this scratch buffer and the board's real Wire buffer must fit it.
     uint16_t read_size = response_length + 4;
     if (read_size < 6) read_size = 6; // ERROR contains failed command + code.
-    if (uint16_t(length) + 4 > 64 || read_size > 64 ||
+    if (uint16_t(length) + 4 > 128 || read_size > 64 ||
         uint16_t(length) + 4 > KINISI_WIRE_BUFFER_SIZE || read_size > KINISI_WIRE_BUFFER_SIZE)
         return fail(KinisiFailure::FRAME_TOO_LARGE, command, id);
-    uint8_t frame[64];
+    uint8_t frame[128];
     frame[0] = length + 3;
     frame[1] = command;
     kinisi_codec::writeUnsigned(frame + 2, id, 2);
@@ -91,7 +93,7 @@ bool KinisiProtocol::begin(uint32_t timeout_ms, uint32_t heartbeat_timeout_ms) {
     timeout_ms_ = timeout_ms ? timeout_ms : 1000;
     kinisiWireBegin();
     uint16_t id = allocateId();
-    const uint8_t init[] = {3, 2, 1, 0, 2, 1, 0, 2};
+    const uint8_t init[] = {3, 2, 3, 1, 2, 1, 0, 2};
     uint8_t response[15];
     uint32_t started = millis();
     if (!send(KINISI_INIT, id, init, sizeof(init), sizeof(response)) ||
@@ -119,11 +121,33 @@ bool KinisiProtocol::begin(uint32_t timeout_ms, uint32_t heartbeat_timeout_ms) {
     return true;
 }
 
-/** Issue a correlated request and wait for its ACK or typed response. */
+/** Reject invalid velocity gains and integral limits before transmission. */
+bool KinisiProtocol::validateVelocityTuning(uint8_t command, double kp, double ki, double kd, double limit) {
+    if (!isfinite(kp) || kp < 0 || !isfinite(ki) || ki < 0 ||
+        !isfinite(kd) || kd < 0 || !isfinite(limit) || limit < 0 || limit > 100)
+        return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    return true;
+}
+
 bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t length,
                              uint8_t* response, uint8_t response_length) {
     error_ = {};
     if (!ready_) return fail(KinisiFailure::NOT_READY, command, 0);
+    uint8_t required_minor = 0;
+    switch (command) {
+        case KINISI_INITIALIZE_MOTOR_POSITION_CONTROLLER:
+        case KINISI_RESET_MOTOR_POSITION:
+        case KINISI_SET_MOTOR_POSITION:
+        case KINISI_GET_MOTOR_POSITION:
+        case KINISI_INITIALIZE_PLATFORM_POSITION_CONTROLLER:
+        case KINISI_RESET_PLATFORM_POSITION:
+        case KINISI_SET_PLATFORM_POSITION: required_minor = 2; break;
+        case KINISI_INITIALIZE_MOTOR_POSITION_PID_CONTROLLER:
+        case KINISI_INITIALIZE_PLATFORM_POSITION_PID_CONTROLLER: required_minor = 3; break;
+        default: break;
+    }
+    if (identity_.protocol_minor < required_minor)
+        return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
     if (command == KINISI_SUBSCRIBE_ODOMETRY && length == 5 && payload[0] == 4 && KINISI_WIRE_BUFFER_SIZE < 38)
         return fail(KinisiFailure::FRAME_TOO_LARGE, command, 0);
     uint16_t id = allocateId();

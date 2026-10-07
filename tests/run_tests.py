@@ -63,7 +63,7 @@ def main():
         check_future_schemas(schema, out / 'future')
         base = [compiler,'-std=c++11','-Wall','-Wextra','-Werror','-I'+str(ROOT/'tests/mocks'),'-I'+str(ROOT)]
         sources = [str(ROOT/p) for p in ['kinisi.cpp','kinisi_protocol.cpp','i2cutils.cpp','tests/test_protocol.cpp']]
-        for capacity in [32,64]:
+        for capacity in [32,64,128]:
             exe=out/('test'+str(capacity)+('.exe' if os.name=='nt' else ''))
             subprocess.run(base+[f'-DKINISI_WIRE_BUFFER_SIZE={capacity}',*sources,'-o',str(exe)],check=True)
             subprocess.run([str(exe)],check=True,timeout=20)

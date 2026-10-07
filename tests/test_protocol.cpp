@@ -17,17 +17,18 @@ static std::vector<uint8_t> frame(uint8_t cmd, uint16_t id, std::vector<uint8_t>
     return data;
 }
 /** Reply to INIT with board identity and its final uptime READY response. */
+static uint8_t protocol_minor = 1;
 static void identity(const std::vector<uint8_t>& request) {
     assert(request.size()==12 && request[0]==11 && request[1]==0x70);
-    const std::vector<uint8_t> expected={3,2,1,0,2,1,0,2};
+    const std::vector<uint8_t> expected={3,2,3,1,2,1,0,2};
     assert(std::vector<uint8_t>(request.begin()+4,request.end())==expected);
     uint16_t id=request[2] | uint16_t(request[3])<<8;
-    Wire.responses.push_back(frame(0x70,id,{1,0,3,1,2,1,0,0x78,0x56,0x34,0x12,0xef,0xcd,0xab,0x90}));
+    Wire.responses.push_back(frame(0x70,id,{1,0,3,1,2,protocol_minor,1,0x78,0x56,0x34,0x12,0xef,0xcd,0xab,0x90}));
     Wire.responses.push_back(frame(0x73,id,{0}));
 }
 /** Reset fake transport and create an INIT/ACK responder. */
 static void reset() {
-    Wire=TwoWire(); fake_millis=0;
+    Wire=TwoWire(); fake_millis=0; protocol_minor=1;
     Wire.responder=[](const std::vector<uint8_t>& r) {
         assert(r.size()==size_t(r[0])+1);
         if(r[1]==0x70) identity(r);
@@ -183,9 +184,63 @@ static void heartbeat_and_events() {
 }
 
 /** Run host tests against the production command and session implementation. */
+static void motion_commands() {
+    reset(); KinisiController c; assert(c.begin(1000,0));
+    size_t before=Wire.transactions;
+    assert(!c.set_motor_position(0,1) && c.lastError().failure==KinisiFailure::UNSUPPORTED_COMMAND);
+    assert(!c.reset_platform_position() && Wire.transactions==before && c.ready());
+    protocol_minor=2; assert(c.begin(1000,0));
+    assert(c.set_motor_position(2,-1.25));
+    assert(Wire.sent==std::vector<uint8_t>({12,0x0e,3,0,2,0,0,0,0,0,0,0xf4,0xbf}));
+    before=Wire.transactions;
+    assert(!c.initialize_motor_position_pid_controller(0,2,1,.02,0,0,1));
+    assert(c.lastError().failure==KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions==before && c.ready());
+    assert(!c.initialize_platform_position_pid_controller(1,2,.2,.5,.01,.03,0,0,.2,0,0,.5));
+    assert(Wire.transactions==before && c.ready());
+    protocol_minor=3; assert(c.begin(1000,0));
+    before=Wire.transactions;
+    assert(!c.start_platform_controller(1,1,0,101));
+    assert(!c.initialize_motor_controller(0,false,0,false,1000,1,NAN,0));
+    assert(c.lastError().failure==KinisiFailure::INVALID_ARGUMENT && Wire.transactions==before);
+#if KINISI_WIRE_BUFFER_SIZE >= 48
+    assert(c.initialize_motor_controller(0,false,0,false,1000,1,1,0));
+    assert(kinisi_codec::readDouble(Wire.sent.data()+40)==100);
+#endif
+#if KINISI_WIRE_BUFFER_SIZE >= 36
+    assert(c.start_platform_controller(1,1,0));
+    assert(kinisi_codec::readDouble(Wire.sent.data()+28)==100);
+#endif
+    before=Wire.transactions;
+    bool ok=c.initialize_motor_position_pid_controller(2,2,3,.02,.1,.2,3);
+#if KINISI_WIRE_BUFFER_SIZE >= 53
+    assert(ok && Wire.sent.size()==53 && Wire.sent[1]==0x10 && Wire.sent[4]==2);
+    assert(kinisi_codec::readDouble(Wire.sent.data()+5)==2);
+    assert(kinisi_codec::readDouble(Wire.sent.data()+45)==3);
+#else
+    assert(!ok && Wire.transactions==before && c.lastError().failure==KinisiFailure::FRAME_TOO_LARGE);
+#endif
+    before=Wire.transactions;
+    ok=c.initialize_platform_position_pid_controller(1,2,.2,.5,.01,.03,.1,.2,.3,.4,.5,.6);
+#if KINISI_WIRE_BUFFER_SIZE >= 100
+    assert(ok && Wire.sent.size()==100 && Wire.sent[1]==0x4e);
+    const double values[]={1,2,.2,.5,.01,.03,.1,.2,.3,.4,.5,.6};
+    for(unsigned i=0;i<12;++i) assert(kinisi_codec::readDouble(Wire.sent.data()+4+8*i)==values[i]);
+#else
+    assert(!ok && Wire.transactions==before && c.lastError().failure==KinisiFailure::FRAME_TOO_LARGE);
+#endif
+    assert(c.reset_motor_position(2));
+    assert(c.set_platform_position(1,-2,.5));
+    assert(Wire.sent.size()==28 && Wire.sent[1]==0x4d);
+    assert(c.reset_platform_position());
+    Wire.responder=[](const std::vector<uint8_t>& r) {
+        Wire.responses.push_back(frame(r[1],r[2] | uint16_t(r[3])<<8,{0,0,0,0,0,0,0x29,0x40}));
+    };
+    assert(c.get_motor_position(2)==12.5);
+}
+
 int main() {
     handshake_and_encoding(); odometry_and_error(); correlation();
     timeouts_and_bus_errors(); invalid_handshakes(); wire_capacity(); floating_point();
-    heartbeat_and_events();
+    heartbeat_and_events(); motion_commands();
     puts("PASS Arduino protocol: INIT/READY, codecs, errors, IDs, deadlines and Wire limits");
 }

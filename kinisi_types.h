@@ -56,6 +56,15 @@ static const uint8_t KINISI_UNSUBSCRIBE_ODOMETRY = 0x7a;
 static const uint8_t KINISI_ENCODER_ODOMETRY_EVENT = 0x7b;
 static const uint8_t KINISI_PLATFORM_ODOMETRY_EVENT = 0x7c;
 static const uint8_t KINISI_POLL_TELEMETRY = 0x7d;
+static const uint8_t KINISI_INITIALIZE_MOTOR_POSITION_CONTROLLER = 0x0C;
+static const uint8_t KINISI_RESET_MOTOR_POSITION = 0x0D;
+static const uint8_t KINISI_SET_MOTOR_POSITION = 0x0E;
+static const uint8_t KINISI_GET_MOTOR_POSITION = 0x0F;
+static const uint8_t KINISI_INITIALIZE_PLATFORM_POSITION_CONTROLLER = 0x4B;
+static const uint8_t KINISI_RESET_PLATFORM_POSITION = 0x4C;
+static const uint8_t KINISI_SET_PLATFORM_POSITION = 0x4D;
+static const uint8_t KINISI_INITIALIZE_MOTOR_POSITION_PID_CONTROLLER = 0x10;
+static const uint8_t KINISI_INITIALIZE_PLATFORM_POSITION_PID_CONTROLLER = 0x4E;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
