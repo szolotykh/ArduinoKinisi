@@ -65,11 +65,15 @@ def generate(schema, output):
     for c in public_commands(schema):
         props = c.get('properties', [])
         args = ', '.join(p['type'] + ' ' + p['name'] for p in props)
+        velocity = c['command'] in ('INITIALIZE_MOTOR_CONTROLLER', 'START_PLATFORM_CONTROLLER')
+        declaration_args = args + ' = 100.0' if velocity else args
         rt = response_type(c)
         method = c['command'].lower()
         doc = c['description'] + ' Errors: ' + ', '.join(c.get('errors', [])) + '.'
-        header.append(f'\n    /** {doc} Check lastError() after getters; setters return success. */\n    {rt or "bool"} {method}({args});\n')
+        header.append(f'\n    /** {doc} Check lastError() after getters; setters return success. */\n    {rt or "bool"} {method}({declaration_args});\n')
         source.append(f'\n/** Encode {c["command"]}, match its reply, and decode the payload. */\n{rt or "bool"} KinisiController::{method}({args}) {{\n')
+        if velocity:
+            source.append(f'    if (!validateVelocityTuning(KINISI_{c["command"]}, kp, ki, kd, integral_limit)) return false;\n')
         n = sum(size(p['type']) for p in props)
         source.append(f'    uint8_t payload[{max(n, 1)}] = {{0}};\n')
         offset = 0

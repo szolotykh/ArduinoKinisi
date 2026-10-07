@@ -1,7 +1,7 @@
 # Arduino API v2
 
 Call `begin(timeout_ms=1000, heartbeat_timeout_ms=500)` before commands. It starts Wire,
-identifies the SDK as Arduino 2.1.0, reads the controller identity, and waits for
+identifies the SDK as Arduino 2.3.1, reads the controller identity, and waits for
 READY. `boardInfo()` exposes hardware revision, protocol version and firmware Git
 build identity; `ready()` reports session readiness.
 
@@ -49,8 +49,9 @@ checks request and response sizes before transmitting, and returns
 
 A default 32-byte AVR Wire buffer supports INIT, encoder odometry, and many basic
 commands. It cannot carry, for example, the 38-byte platform-odometry reply or
-the 61-byte motor-controller-state reply. A **64-byte TX and RX buffer** supports
-all current commands. Use a core with sufficient buffers or configure its actual
+the 61-byte motor-controller-state reply. A **64-byte TX and RX buffer** supports motor position PID. Platform position
+PID initialization needs a **100-byte TX buffer** (a 128-byte Wire configuration
+is suitable); the P-only platform setup needs 52 bytes. Use a core with sufficient buffers or configure its actual
 buffers, then set `KINISI_WIRE_BUFFER_SIZE` consistently for the library build.
 The macro alone does not enlarge Wire. The library detects `BUFFER_LENGTH` or
 `I2C_BUFFER_LENGTH`, otherwise conservatively assumes 32 bytes.
@@ -76,3 +77,11 @@ levels, actual I2C clock stretching, encoders, or motor movement.
 To compile against the real Arduino Uno core, run
 `pio run -d tests/avr -e uno`. This compiles the AVR numeric-conversion path;
 it does not run the sketch or flash a board.
+
+## Position and velocity tuning
+
+Position calls require READY and protocol 2.2+, or 2.3+ for full PID setup.
+`UNSUPPORTED_COMMAND` reports a local feature-version rejection while keeping
+basic commands available. `INVALID_ARGUMENT` reports invalid velocity gains or
+an integral limit outside 0..100 before any bus transaction. The optional
+velocity integral-limit argument defaults to 100 PWM percentage points.

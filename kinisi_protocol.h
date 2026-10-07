@@ -8,7 +8,8 @@
 /** Local failures are separate from the controller's shared wire error codes. */
 enum class KinisiFailure : uint8_t {
     NONE, NOT_READY, TIMEOUT, TRANSPORT, FRAME_TOO_LARGE,
-    MALFORMED_RESPONSE, INCOMPATIBLE_PROTOCOL, CONTROLLER
+    MALFORMED_RESPONSE, INCOMPATIBLE_PROTOCOL, CONTROLLER,
+    INVALID_ARGUMENT, UNSUPPORTED_COMMAND
 };
 /** Result of the most recent operation; zero-valued getter results may be errors. */
 struct KinisiError {
@@ -37,6 +38,8 @@ public:
     /** Failure of the most recent operation; inspect after every value-returning getter. */
     const KinisiError& lastError() const { return error_; }
 protected:
+    /** Reject invalid velocity gains locally; integral contribution is 0..100 PWM points. */
+    bool validateVelocityTuning(uint8_t command, double kp, double ki, double kd, double limit);
     /** Execute exactly one request; never retry an operation that might have executed. */
     bool request(uint8_t command, const uint8_t* payload, uint8_t length,
                  uint8_t* response, uint8_t response_length);

@@ -9,10 +9,10 @@ public:
     /** Select a seven-bit I2C address (default 8). Does not touch the bus. */
     explicit KinisiController(uint8_t address = 8) : KinisiProtocol(address) {}
 
-    /** This command initializes a motor and prepares it for use. Rejected with MOTOR_OWNED if the motor is currently owned by an active platform (one of its wheels), so platform wheels are not reconfigured out from under the platform. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, MOTOR_OWNED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
+    /** This command initializes a motor and prepares it for use. Rejected with MOTOR_OWNED if the motor is currently owned by an active platform (one of its wheels), so platform wheels are not reconfigured out from under the platform. Stops the motor velocity and position controllers before applying the command. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, MOTOR_OWNED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
     bool initialize_motor(uint8_t motor_index, bool is_reversed);
 
-    /** This command sets the speed of the specified motor in PWM. Rejected with MOTOR_OWNED if the motor is currently owned by an active platform (one of its wheels); use the platform velocity commands to drive platform wheels. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, MOTOR_OWNED, MOTOR_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
+    /** This command sets the speed of the specified motor in PWM. Rejected with MOTOR_OWNED if the motor is currently owned by an active platform (one of its wheels); use the platform velocity commands to drive platform wheels. Stops the motor velocity and position controllers before applying the command. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, MOTOR_OWNED, MOTOR_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
     bool set_motor_speed(uint8_t motor_index, double pwm);
 
     /** Coasts the motor to a stop: both H-bridge outputs are driven low, leaving the motor terminals open (high impedance) so it free-wheels and spins down gradually under its own friction. This also stops that motor's closed-loop speed controller if one is running (started via INITIALIZE_MOTOR_CONTROLLER), so the PID loop cannot re-drive the motor; to command the motor by target speed again you must re-initialize its controller. This is a single-motor command and is ignored if the motor is currently owned by an active platform (one of its wheels); to stop a platform, use STOP_PLATFORM_CONTROLLER, COAST_PLATFORM or BRAKE_PLATFORM instead. Use STOP_MOTOR for a soft, low-stress stop; use BRAKE_MOTOR when you need the motor to hold position and stop quickly. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, MOTOR_OWNED. Check lastError() after getters; setters return success. */
@@ -21,10 +21,10 @@ public:
     /** Actively brakes the motor (short brake): both H-bridge outputs are driven high, shorting the motor terminals together so the motor's own back-EMF resists rotation and it stops quickly and holds position. This also stops that motor's closed-loop speed controller if one is running (started via INITIALIZE_MOTOR_CONTROLLER), so the PID loop cannot re-drive the motor; to command the motor by target speed again you must re-initialize its controller. This is a single-motor command and is ignored if the motor is currently owned by an active platform (one of its wheels); to brake a platform, use BRAKE_PLATFORM (or STOP_PLATFORM_CONTROLLER / COAST_PLATFORM) instead. Use BRAKE_MOTOR for a fast, holding stop; use STOP_MOTOR to let the motor coast freely instead. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, MOTOR_OWNED. Check lastError() after getters; setters return success. */
     bool brake_motor(uint8_t motor_index);
 
-    /** This command sets the controller for the specified motor. Rejected with MOTOR_OWNED if the motor is currently owned by an active platform (one of its wheels), so it cannot create a competing controller on a platform wheel. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, MOTOR_OWNED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
-    bool initialize_motor_controller(uint8_t motor_index, bool is_reversed, uint8_t encoder_index, bool is_encoder_reversed, double encoder_resolution, double kp, double ki, double kd, double integral_limit);
+    /** This command sets the controller for the specified motor. Rejected with MOTOR_OWNED if the motor is currently owned by an active platform (one of its wheels), so it cannot create a competing controller on a platform wheel. Firmware 2.3.1 uses direct P+I+D PWM output with saturation anti-windup; retune gains from earlier builds. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, MOTOR_OWNED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
+    bool initialize_motor_controller(uint8_t motor_index, bool is_reversed, uint8_t encoder_index, bool is_encoder_reversed, double encoder_resolution, double kp, double ki, double kd, double integral_limit = 100.0);
 
-    /** This command sets the target speed for the specified motor in radians. Rejected with MOTOR_OWNED if the motor is currently owned by an active platform (one of its wheels); use SET_PLATFORM_TARGET_VELOCITY to drive platform wheels. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, MOTOR_OWNED, CONTROLLER_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
+    /** This command sets the target speed for the specified motor in radians. Rejected with MOTOR_OWNED if the motor is currently owned by an active platform (one of its wheels); use SET_PLATFORM_TARGET_VELOCITY to drive platform wheels. Suspends position mode; a new SET_MOTOR_POSITION reactivates it. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, MOTOR_OWNED, CONTROLLER_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
     bool set_motor_target_speed(uint8_t motor_index, double speed);
 
     /** This command resets the closed-loop controller for the specified motor: it clears the accumulated PID state (integrator windup, derivative history and internal output) and re-zeros the target speed, while keeping the controller running with its existing tuning (kp/ki/kd). Use it to recover from integrator windup or to bring a motor cleanly to a stop without deleting and re-initializing the controller. No effect if no controller is running for that motor, and ignored if the motor is currently owned by an active platform (one of its wheels). Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, MOTOR_OWNED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
@@ -42,7 +42,7 @@ public:
     /** This command retrieves the current global update frequency (in Hz) of the closed-loop motor controller task. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED. Check lastError() after getters; setters return success. */
     uint16_t get_controller_frequency();
 
-    /** This command initializes an encoder and prepares it for use. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED. Check lastError() after getters; setters return success. */
+    /** This command initializes an encoder and prepares it for use. Stops controllers using this encoder before changing its configuration. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED. Check lastError() after getters; setters return success. */
     bool initialize_encoder(uint8_t encoder_index, double encoder_resolution, bool is_reversed);
 
     /** This command retrieves the current value of the encoder. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, ENCODER_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
@@ -93,13 +93,13 @@ public:
     /** This command initializes a differential (2-wheel) platform and prepares it for use. It uses motor and encoder index 0 for the left wheel and index 1 for the right wheel, which correspond to the is_reversed_0/1 and is_encoder_reversed_0/1 parameters. Motor indices 2 and 3 are not used by this platform and stay free for other purposes. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED. Check lastError() after getters; setters return success. */
     bool initialize_differential_platform(bool is_reversed_0, bool is_reversed_1, bool is_encoder_reversed_0, bool is_encoder_reversed_1, double wheel_diameter, double wheel_base, double encoder_resolution);
 
-    /** This command sets the velocity for the platform in PWM. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, PLATFORM_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
+    /** This command sets the velocity for the platform in PWM. Stops platform velocity and position control before applying PWM. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, PLATFORM_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
     bool set_platform_velocity(double x, double y, double t);
 
-    /** This command sets the controller for the platform. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, PLATFORM_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
-    bool start_platform_controller(double kp, double ki, double kd, double integral_limit);
+    /** This command sets the controller for the platform. Firmware 2.3.1 uses direct P+I+D PWM output with saturation anti-windup; retune gains from earlier builds. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, PLATFORM_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
+    bool start_platform_controller(double kp, double ki, double kd, double integral_limit = 100.0);
 
-    /** This command set the target velocity for the platform in meters per second. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, PLATFORM_NOT_INITIALIZED, CONTROLLER_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
+    /** This command set the target velocity for the platform in meters per second. Cancels platform position control; initialize it again before another pose target. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, PLATFORM_NOT_INITIALIZED, CONTROLLER_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
     bool set_platform_target_velocity(double x, double y, double t);
 
     /** This command gets the current velocity of the platform in meters per second. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED. Check lastError() after getters; setters return success. */
@@ -149,5 +149,32 @@ public:
 
     /** I2C master service request. Allows at most one due odometry event before its empty ACK, so the master can clock out telemetry without waiting indefinitely when no sample is available. USB clients receive events automatically and do not need this command. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED, CLOCK_NOT_READY. Check lastError() after getters; setters return success. */
     bool poll_telemetry();
+
+    /** Initialize a bounded proportional position loop over an already running motor velocity controller. Zero is the current encoder position; initially holds zero. Stop/delete/reinitialize of velocity control discards position tuning. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED, CONTROLLER_NOT_INITIALIZED, MOTOR_OWNED. Check lastError() after getters; setters return success. */
+    bool initialize_motor_position_controller(uint8_t motor_index, double kp, double max_speed, double tolerance);
+
+    /** Zero the motor position and target at the current encoder count, clear velocity PID history and output, and hold zero. Requires initialized position control. Does not reset independent encoder odometry. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED, CONTROLLER_NOT_INITIALIZED, MOTOR_OWNED. Check lastError() after getters; setters return success. */
+    bool reset_motor_position(uint8_t motor_index);
+
+    /** Set an absolute multi-turn angle in radians relative to the last position initialization/reset. Requires initialized position and velocity controllers. Reactivates position mode after a velocity override. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED, CONTROLLER_NOT_INITIALIZED, MOTOR_OWNED. Check lastError() after getters; setters return success. */
+    bool set_motor_position(uint8_t motor_index, double position);
+
+    /** Read the latest motor position in radians in the position-controller frame. Requires initialized position control. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED, CONTROLLER_NOT_INITIALIZED, MOTOR_OWNED. Check lastError() after getters; setters return success. */
+    double get_motor_position(uint8_t motor_index);
+
+    /** Initialize bounded pose control after START_PLATFORM_CONTROLLER. Starts odometry if needed, preserves its world frame and zeros velocity targets. No motion until SET_PLATFORM_POSITION. Supports omni, mecanum and differential bases. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED, CONTROLLER_NOT_INITIALIZED, PLATFORM_NOT_INITIALIZED, ENCODER_NOT_INITIALIZED. Check lastError() after getters; setters return success. */
+    bool initialize_platform_position_controller(double linear_kp, double angular_kp, double max_linear_speed, double max_angular_speed, double position_tolerance, double heading_tolerance);
+
+    /** Cancel the pose target, zero velocity targets, and reset platform odometry to (0,0,0). Keeps position tuning. Wait for a fresh odometry sample before setting another target. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED, CONTROLLER_NOT_INITIALIZED, PLATFORM_NOT_INITIALIZED. Check lastError() after getters; setters return success. */
+    bool reset_platform_position();
+
+    /** Set absolute (x,y,t) in the current odometry world frame: meters, meters, radians. Heading uses the shortest angular path. Requires initialized position control and fresh odometry. Differential bases approach the point before aligning final heading. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED, CONTROLLER_NOT_INITIALIZED, PLATFORM_NOT_INITIALIZED, ODOMETRY_NOT_INITIALIZED, SAMPLE_NOT_AVAILABLE. Check lastError() after getters; setters return success. */
+    bool set_platform_position(double x, double y, double t);
+
+    /** Protocol 2.3: initialize a position PID over the existing velocity controller. Initialize a bounded position PID loop over an already running motor velocity controller. Zero is the current encoder position; initially holds zero. Stop/delete/reinitialize of velocity control discards position tuning. Clears position PID history. Ki and Kd may be zero to disable I and D. Integral limits bound the integral velocity contribution. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED, CONTROLLER_NOT_INITIALIZED, MOTOR_OWNED. Check lastError() after getters; setters return success. */
+    bool initialize_motor_position_pid_controller(uint8_t motor_index, double kp, double max_speed, double tolerance, double ki, double kd, double integral_limit);
+
+    /** Protocol 2.3: initialize a position PID over the existing velocity controller. Initialize bounded pose control after START_PLATFORM_CONTROLLER. Starts odometry if needed, preserves its world frame and zeros velocity targets. No motion until SET_PLATFORM_POSITION. Supports omni, mecanum and differential bases. Clears position PID history. Ki and Kd may be zero to disable I and D. Integral limits bound the integral velocity contribution. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED, CONTROLLER_NOT_INITIALIZED, PLATFORM_NOT_INITIALIZED, ENCODER_NOT_INITIALIZED. Check lastError() after getters; setters return success. */
+    bool initialize_platform_position_pid_controller(double linear_kp, double angular_kp, double max_linear_speed, double max_angular_speed, double position_tolerance, double heading_tolerance, double linear_ki, double linear_kd, double linear_integral_limit, double angular_ki, double angular_kd, double angular_integral_limit);
 };
 #endif
