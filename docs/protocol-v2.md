@@ -80,8 +80,19 @@ it does not run the sketch or flash a board.
 
 ## Position and velocity tuning
 
-Position calls require READY and protocol 2.2+, or 2.3+ for full PID setup.
-`UNSUPPORTED_COMMAND` reports a local feature-version rejection while keeping
-basic commands available. `INVALID_ARGUMENT` reports invalid velocity gains or
-an integral limit outside 0..100 before any bus transaction. The optional
-velocity integral-limit argument defaults to 100 PWM percentage points.
+Connections accept protocol 2.1+. Position calls require READY and protocol
+2.2+, or 2.3+ for full PID setup. Unsupported position calls return `false` with
+`UNSUPPORTED_COMMAND` without sending a frame or closing the session.
+
+`initialize_motor_controller` and `start_platform_controller` default their final
+`integral_limit` argument to **100 PWM percentage points**. It bounds I alone;
+total PWM stays capped at +/-100% with firmware anti-windup. `INVALID_ARGUMENT`
+reports invalid velocity gains or an integral limit outside 0..100 before any
+bus transaction. Firmware 2.3.1 uses direct PID output, so retune older gains.
+Kp=1, Ki=1, Kd=0 are example starting values, not a tuned motor profile.
+
+Initialize velocity before position. Motor position uses continuous radians;
+platform targets use world-frame meters/meters/radians. Position integral limits
+are speed contributions (rad/s or m/s). Reset changes the origin and clears the
+target. Velocity overrides cancel position mode; stops and reinitialization can
+require position setup again. See [the motor/platform example](../examples/position-control/position-control.ino).
