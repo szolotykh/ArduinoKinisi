@@ -2,6 +2,33 @@
 #include "kinisi.h"
 #include "kinisi_codec.h"
 
+/** Encode GET_TEMPERATURE, match its reply, and decode the payload. */
+double KinisiController::get_temperature(uint8_t sensor_index) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(sensor_index), 1);
+    double result = {};
+    uint8_t response[8] = {0};
+    if (!request(KINISI_GET_TEMPERATURE, payload, 1, response, 8)) return result;
+    result = kinisi_codec::readDouble(response);
+    return result;
+}
+
+/** Encode GET_IMU, match its reply, and decode the payload. */
+imu_sample KinisiController::get_imu(uint8_t sensor_index) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(sensor_index), 1);
+    imu_sample result = {};
+    uint8_t response[48] = {0};
+    if (!request(KINISI_GET_IMU, payload, 1, response, 48)) return result;
+    result.acceleration_x = kinisi_codec::readDouble(response + 0);
+    result.acceleration_y = kinisi_codec::readDouble(response + 8);
+    result.acceleration_z = kinisi_codec::readDouble(response + 16);
+    result.angular_velocity_x = kinisi_codec::readDouble(response + 24);
+    result.angular_velocity_y = kinisi_codec::readDouble(response + 32);
+    result.angular_velocity_z = kinisi_codec::readDouble(response + 40);
+    return result;
+}
+
 /** Encode INITIALIZE_MOTOR, match its reply, and decode the payload. */
 bool KinisiController::initialize_motor(uint8_t motor_index, bool is_reversed) {
     uint8_t payload[2] = {0};

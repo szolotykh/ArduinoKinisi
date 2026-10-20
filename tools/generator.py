@@ -12,7 +12,7 @@ HEADER = '// Generated from tools/commands.json; edit the schema or generator in
 # Keep dependencies of the handwritten session while allowing new schema commands.
 SESSION_COMMANDS = {'PING', 'SET_HEARTBEAT_CONFIG', 'SUBSCRIBE_ODOMETRY',
                     'UNSUBSCRIBE_ODOMETRY', 'ENCODER_ODOMETRY_EVENT',
-                    'PLATFORM_ODOMETRY_EVENT', 'POLL_TELEMETRY'}
+                    'PLATFORM_ODOMETRY_EVENT', 'POLL_TELEMETRY', 'GET_TEMPERATURE', 'GET_IMU'}
 
 
 def public_commands(schema):
@@ -27,7 +27,7 @@ def response_type(command):
     return (r['name'] if r['type'] == 'object' else r['type']) if r else None
 
 
-def generate(schema, output):
+def generate(schema, output, check=False):
     """Validate schema types and emit deterministic headers, methods and Arduino keywords."""
     version = schema.get('version')
     if not isinstance(version, str) or not re.fullmatch(r'2\.\d+\.\d+', version):
@@ -100,10 +100,16 @@ def generate(schema, output):
     header.append('};\n#endif\n')
     keywords = '# Generated Arduino syntax map.\nKinisiController\tKEYWORD1\nbegin\tKEYWORD2\nready\tKEYWORD2\nboardInfo\tKEYWORD2\nlastError\tKEYWORD2\n'
     keywords += 'poll\tKEYWORD2\ngetSubscribedEncoderOdometry\tKEYWORD2\ngetSubscribedPlatformOdometry\tKEYWORD2\n'
+    keywords += 'boardProfile\tKEYWORD2\nsupportsSensor\tKEYWORD2\nKinisiSensor\tKEYWORD1\nKinisiBoardProfile\tKEYWORD1\n'
     keywords += ''.join(c['command'].lower() + '\tKEYWORD2\n' for c in public_commands(schema))
-    output.mkdir(parents=True, exist_ok=True)
+    if not check:
+        output.mkdir(parents=True, exist_ok=True)
     for name, content in [('kinisi_types.h', ''.join(types)), ('kinisi.h', ''.join(header)), ('kinisi.cpp', ''.join(source)), ('keywords.txt', keywords)]:
-        (output / name).write_text(content, encoding='utf-8', newline='\n')
+        if check:
+            if not (output / name).exists() or (output / name).read_text(encoding='utf-8') != content:
+                raise ValueError('Stale generated file: ' + name)
+        else:
+            (output / name).write_text(content, encoding='utf-8', newline='\n')
 
 
 def main():

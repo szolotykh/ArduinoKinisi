@@ -20,7 +20,7 @@ static std::vector<uint8_t> frame(uint8_t cmd, uint16_t id, std::vector<uint8_t>
 static uint8_t protocol_minor = 1;
 static void identity(const std::vector<uint8_t>& request) {
     assert(request.size()==12 && request[0]==11 && request[1]==0x70);
-    const std::vector<uint8_t> expected={3,2,3,1,2,1,0,2};
+    const std::vector<uint8_t> expected={3,2,5,0,2,1,0,2};
     assert(std::vector<uint8_t>(request.begin()+4,request.end())==expected);
     uint16_t id=request[2] | uint16_t(request[3])<<8;
     Wire.responses.push_back(frame(0x70,id,{1,0,3,1,2,protocol_minor,1,0x78,0x56,0x34,0x12,0xef,0xcd,0xab,0x90}));
@@ -129,8 +129,10 @@ static void wire_capacity() {
     (void)result;
     assert(c.lastError().failure==KinisiFailure::FRAME_TOO_LARGE && c.ready());
     assert(Wire.transactions==before);
+#if KINISI_WIRE_BUFFER_SIZE < 44
     assert(!c.initialize_mecanum_platform(false,false,false,false,false,false,false,false,0.1,0.2,0.1,1000));
     assert(Wire.transactions==before);
+#endif
 #else
     assert(Wire.transactions==before+1 && c.lastError().failure==KinisiFailure::NONE);
     assert(result.motor_index==2 && result.kp==1.0);
