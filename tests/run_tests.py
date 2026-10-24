@@ -31,6 +31,17 @@ def check_incompatible_schemas(schema, output):
             raise AssertionError(f'Accepted incompatible schema: {version}')
         assert before == {name: (output / name).read_bytes() for name in names}
     print('PASS incompatible schemas preserve generated library files', flush=True)
+    for missing in [{'GET_TEMPERATURE'}, {'GET_IMU'}, {'GET_TEMPERATURE', 'GET_IMU'}]:
+        incompatible = deepcopy(schema)
+        incompatible['commands'] = [c for c in incompatible['commands'] if c['command'] not in missing]
+        try:
+            generate(incompatible, output)
+        except ValueError as error:
+            assert 'missing runtime commands: ' + ', '.join(sorted(missing)) in str(error), error
+        else:
+            raise AssertionError(f'Accepted missing sensor dependencies: {missing}')
+        assert before == {name: (output / name).read_bytes() for name in names}
+    print('PASS missing sensor commands preserve generated files', flush=True)
 
 
 def check_future_schemas(schema, output):
@@ -52,6 +63,7 @@ def main():
     compiler = os.environ.get('CXX') or shutil.which('g++')
     if not compiler:
         raise SystemExit('Set CXX to a C++11 compiler')
+    subprocess.run([sys.executable, str(ROOT / 'tests/test_board_profiles.py')], check=True)
     schema = json.loads((ROOT / 'tools/commands.json').read_text(encoding='utf-8'))
     with tempfile.TemporaryDirectory(prefix='kinisi-arduino-') as folder:
         out = Path(folder)
@@ -62,11 +74,14 @@ def main():
         check_incompatible_schemas(schema, out)
         check_future_schemas(schema, out / 'future')
         base = [compiler,'-std=c++11','-Wall','-Wextra','-Werror','-I'+str(ROOT/'tests/mocks'),'-I'+str(ROOT)]
-        sources = [str(ROOT/p) for p in ['kinisi.cpp','kinisi_protocol.cpp','i2cutils.cpp','tests/test_protocol.cpp']]
-        for capacity in [32,64,128]:
+        sources = [str(ROOT/p) for p in ['kinisi.cpp','kinisi_protocol.cpp','kinisi_board_profiles.cpp','i2cutils.cpp','tests/test_protocol.cpp']]
+        for capacity in [32,52,64,128]:
             exe=out/('test'+str(capacity)+('.exe' if os.name=='nt' else ''))
             subprocess.run(base+[f'-DKINISI_WIRE_BUFFER_SIZE={capacity}',*sources,'-o',str(exe)],check=True)
             subprocess.run([str(exe)],check=True,timeout=20)
+            sensor_exe=out/('sensors'+str(capacity)+('.exe' if os.name=='nt' else ''))
+            subprocess.run(base+[f'-DKINISI_WIRE_BUFFER_SIZE={capacity}',*sources[:-1],str(ROOT/'tests/test_sensors.cpp'),'-o',str(sensor_exe)],check=True)
+            subprocess.run([str(sensor_exe)],check=True,timeout=20)
         firmware = ROOT.parent / 'kinisi-motor-controller-firmware'
         cc = os.environ.get('CC') or shutil.which('gcc')
         if cc and (firmware/'lib/connection/connection.c').exists():

@@ -1,6 +1,62 @@
 {
-    "version": "2.3.1",
+    "version": "2.5.0",
     "commands": [
+        {
+            "command": "GET_TEMPERATURE",
+            "code": "0x50",
+            "direction": "client_to_controller",
+            "description": "Protocol 2.4: read the latest board temperature in degrees Celsius. Sensor 0 is the TMP102 on v0.4. Sampling runs at 4 Hz; faster reads may repeat a sample. Returns SAMPLE_NOT_AVAILABLE during the first 300 ms after sensor initialization or recovery, SENSOR_NOT_AVAILABLE when the board has no such sensor, and INTERNAL_ERROR on I2C or configuration failure.",
+            "properties": [
+                {
+                    "name": "sensor_index",
+                    "type": "uint8_t",
+                    "description": "Zero-based index in the board temperature_sensors array."
+                }
+            ],
+            "category": "Sensors",
+            "errors": [
+                "INVALID_LENGTH",
+                "INVALID_ARGUMENT",
+                "INIT_REQUIRED",
+                "SENSOR_NOT_AVAILABLE",
+                "SAMPLE_NOT_AVAILABLE",
+                "INTERNAL_ERROR"
+            ],
+            "response": {
+                "name": "temperature_celsius",
+                "type": "double",
+                "direction": "controller_to_client",
+                "description": "Latest temperature in degrees Celsius, encoded as a little-endian IEEE 754 64-bit double."
+            }
+        },
+        {
+            "command": "GET_IMU",
+            "code": "0x51",
+            "direction": "client_to_controller",
+            "description": "Protocol 2.5: read the latest accelerometer and gyroscope samples in native sensor axes. Acceleration is in m/s^2 and includes gravity; angular velocity is in rad/s. BMI088 uses +/-6 g and +/-500 degrees/s at 100 Hz. Each three-axis sample is coherent, but accel and gyro are not time-synchronized. Faster requests may repeat samples. No orientation or calibration is applied. Returns SAMPLE_NOT_AVAILABLE during the 50 ms settling interval after initialization or recovery, SENSOR_NOT_AVAILABLE for an absent sensor, and INTERNAL_ERROR on SPI, identity or configuration failure.",
+            "properties": [
+                {
+                    "name": "sensor_index",
+                    "type": "uint8_t",
+                    "description": "Zero-based index in the board imu_sensors array."
+                }
+            ],
+            "category": "Sensors",
+            "errors": [
+                "INVALID_LENGTH",
+                "INVALID_ARGUMENT",
+                "INIT_REQUIRED",
+                "SENSOR_NOT_AVAILABLE",
+                "SAMPLE_NOT_AVAILABLE",
+                "INTERNAL_ERROR"
+            ],
+            "response": {
+                "name": "imu_sample",
+                "type": "object",
+                "direction": "controller_to_client",
+                "description": "Six little-endian IEEE 754 doubles, 48 bytes total."
+            }
+        },
         {
             "command": "INITIALIZE_MOTOR",
             "code": "0x01",
@@ -71,7 +127,7 @@
             "command": "STOP_MOTOR",
             "code": "0x03",
             "direction": "client_to_controller",
-            "description": "Coasts the motor to a stop: both H-bridge outputs are driven low, leaving the motor terminals open (high impedance) so it free-wheels and spins down gradually under its own friction. This also stops that motor's closed-loop speed controller if one is running (started via INITIALIZE_MOTOR_CONTROLLER), so the PID loop cannot re-drive the motor; to command the motor by target speed again you must re-initialize its controller. This is a single-motor command and is ignored if the motor is currently owned by an active platform (one of its wheels); to stop a platform, use STOP_PLATFORM_CONTROLLER, COAST_PLATFORM or BRAKE_PLATFORM instead. Use STOP_MOTOR for a soft, low-stress stop; use BRAKE_MOTOR when you need the motor to hold position and stop quickly.",
+            "description": "Stops the motor's velocity and position controllers and lets the motor coast with the H-bridge outputs in high impedance. On dual-PWM boards both PWM control inputs are low. On V4 enable/direction boards DISABLE is high and EN duty is zero. The command ID and payload are the same for all boards; firmware selects the hardware behavior from the board configuration. A motor owned by an active platform is rejected with MOTOR_OWNED; use COAST_PLATFORM or STOP_PLATFORM_CONTROLLER for platform wheels. Re-initialize the motor controller before using target-speed control again. Use BRAKE_MOTOR for a short brake instead of coasting.",
             "properties": [
                 {
                     "name": "motor_index",
@@ -95,7 +151,7 @@
             "command": "BRAKE_MOTOR",
             "code": "0x04",
             "direction": "client_to_controller",
-            "description": "Actively brakes the motor (short brake): both H-bridge outputs are driven high, shorting the motor terminals together so the motor's own back-EMF resists rotation and it stops quickly and holds position. This also stops that motor's closed-loop speed controller if one is running (started via INITIALIZE_MOTOR_CONTROLLER), so the PID loop cannot re-drive the motor; to command the motor by target speed again you must re-initialize its controller. This is a single-motor command and is ignored if the motor is currently owned by an active platform (one of its wheels); to brake a platform, use BRAKE_PLATFORM (or STOP_PLATFORM_CONTROLLER / COAST_PLATFORM) instead. Use BRAKE_MOTOR for a fast, holding stop; use STOP_MOTOR to let the motor coast freely instead.",
+            "description": "Stops the motor's velocity and position controllers and applies a short brake, connecting both motor terminals to the same bridge rail to resist rotation. On dual-PWM boards both PWM control inputs are high. On V4 enable/direction boards DISABLE is low and EN duty is zero; direction does not affect braking. The command ID and payload are the same for all boards; firmware selects the hardware behavior from the board configuration. Short braking does not regulate or hold a specific position. A motor owned by an active platform is rejected with MOTOR_OWNED; use BRAKE_PLATFORM for platform wheels. Re-initialize the motor controller before using target-speed control again. Use STOP_MOTOR to coast instead.",
             "properties": [
                 {
                     "name": "motor_index",
@@ -1117,7 +1173,7 @@
             "command": "BRAKE_PLATFORM",
             "code": "0x49",
             "direction": "client_to_controller",
-            "description": "This command actively brakes all of this platform's wheel motors (short brake) so they resist motion and hold position, and stops the platform velocity controller if it is running (you must call START_PLATFORM_CONTROLLER again to resume closed-loop platform control). Motors used outside this platform are not affected. The motors resist motion until a new command is issued.",
+            "description": "Stops the platform velocity and position controllers and applies a short brake to this platform's wheel motors using the selected board's motor control model. Other motors are not affected. The brake resists motion until a new command is issued; it does not regulate or hold a specific position. Call START_PLATFORM_CONTROLLER again to resume closed-loop platform control.",
             "category": "Platform",
             "errors": [
                 "INVALID_LENGTH",
@@ -2132,6 +2188,42 @@
                     ]
                 }
             ]
+        },
+        {
+            "name": "imu_sample",
+            "description": "Latest independent accelerometer and gyroscope samples in sensor axes.",
+            "properties": [
+                {
+                    "name": "acceleration_x",
+                    "type": "double",
+                    "description": "X acceleration in m/s^2, including gravity."
+                },
+                {
+                    "name": "acceleration_y",
+                    "type": "double",
+                    "description": "Y acceleration in m/s^2, including gravity."
+                },
+                {
+                    "name": "acceleration_z",
+                    "type": "double",
+                    "description": "Z acceleration in m/s^2, including gravity."
+                },
+                {
+                    "name": "angular_velocity_x",
+                    "type": "double",
+                    "description": "X angular velocity in rad/s."
+                },
+                {
+                    "name": "angular_velocity_y",
+                    "type": "double",
+                    "description": "Y angular velocity in rad/s."
+                },
+                {
+                    "name": "angular_velocity_z",
+                    "type": "double",
+                    "description": "Z angular velocity in rad/s."
+                }
+            ]
         }
     ],
     "header": {
@@ -2200,7 +2292,7 @@
         {
             "code": 10,
             "name": "SAMPLE_NOT_AVAILABLE",
-            "description": "Odometry is running but has no measurement yet, including immediately after reset; retry after an update."
+            "description": "The requested measurement is not ready yet, including after initialization or reset; retry after an update."
         },
         {
             "code": 11,
@@ -2226,6 +2318,11 @@
             "code": 15,
             "name": "INIT_REQUIRED",
             "description": "Send a valid INIT request before performing this connection-dependent operation."
+        },
+        {
+            "code": 16,
+            "name": "SENSOR_NOT_AVAILABLE",
+            "description": "The selected sensor is not defined on this board."
         }
     ]
 }

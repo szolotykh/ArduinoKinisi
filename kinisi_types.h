@@ -2,6 +2,8 @@
 #ifndef KINISI_TYPES_H
 #define KINISI_TYPES_H
 #include <stdint.h>
+static const uint8_t KINISI_GET_TEMPERATURE = 0x50;
+static const uint8_t KINISI_GET_IMU = 0x51;
 static const uint8_t KINISI_INITIALIZE_MOTOR = 0x01;
 static const uint8_t KINISI_SET_MOTOR_SPEED = 0x02;
 static const uint8_t KINISI_STOP_MOTOR = 0x03;
@@ -78,12 +80,13 @@ enum class KinisiErrorCode : uint8_t {
     CLOCK_NOT_READY = 7, // Initial clock setup is incomplete; wait for READY. Uptime mode also supports READY.
     TIME_SYNC_FAILED = 8, // Initial time sync exhausted its attempts without a valid sample.
     ODOMETRY_NOT_INITIALIZED = 9, // Odometry is not running; start odometry before requesting a measurement.
-    SAMPLE_NOT_AVAILABLE = 10, // Odometry is running but has no measurement yet, including immediately after reset; retry after an update.
+    SAMPLE_NOT_AVAILABLE = 10, // The requested measurement is not ready yet, including after initialization or reset; retry after an update.
     ENCODER_NOT_INITIALIZED = 11, // Initialize the encoder before reading it or starting encoder odometry.
     PLATFORM_NOT_INITIALIZED = 12, // Initialize a platform before performing this operation.
     MOTOR_NOT_INITIALIZED = 13, // Initialize the motor before setting its speed.
     CONTROLLER_NOT_INITIALIZED = 14, // Start or initialize the closed-loop controller before setting its target.
     INIT_REQUIRED = 15, // Send a valid INIT request before performing this connection-dependent operation.
+    SENSOR_NOT_AVAILABLE = 16, // The selected sensor is not defined on this board.
 };
 
 /** The state of the controller for the specified motor. */
@@ -155,5 +158,15 @@ struct platform_odometry_sample {
 struct heartbeat_config {
     bool enabled; ///< Enable monitoring; disabled initially for compatibility.
     uint32_t timeout_ms; ///< Monotonic receive timeout. Default 500 ms; send PING after at most timeout/5 of idle time (100 ms with the default).
+};
+
+/** Latest independent accelerometer and gyroscope samples in sensor axes. */
+struct imu_sample {
+    double acceleration_x; ///< X acceleration in m/s^2, including gravity.
+    double acceleration_y; ///< Y acceleration in m/s^2, including gravity.
+    double acceleration_z; ///< Z acceleration in m/s^2, including gravity.
+    double angular_velocity_x; ///< X angular velocity in rad/s.
+    double angular_velocity_y; ///< Y angular velocity in rad/s.
+    double angular_velocity_z; ///< Z angular velocity in rad/s.
 };
 #endif

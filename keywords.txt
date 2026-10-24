@@ -7,6 +7,12 @@ lastError	KEYWORD2
 poll	KEYWORD2
 getSubscribedEncoderOdometry	KEYWORD2
 getSubscribedPlatformOdometry	KEYWORD2
+boardProfile	KEYWORD2
+supportsSensor	KEYWORD2
+KinisiSensor	KEYWORD1
+KinisiBoardProfile	KEYWORD1
+get_temperature	KEYWORD2
+get_imu	KEYWORD2
 initialize_motor	KEYWORD2
 set_motor_speed	KEYWORD2
 stop_motor	KEYWORD2

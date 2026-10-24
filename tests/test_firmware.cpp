@@ -26,6 +26,10 @@ int main() {
     KinisiController c;
     assert(c.begin() && c.ready());
     assert(c.boardInfo().protocol_major==2 && c.boardInfo().board_model==1);
+    assert(c.boardProfile() && c.boardProfile()->minor == 3);
+    assert(c.boardProfile()->resources.gpio == 10);
+    c.get_temperature(0);
+    assert(c.lastError().failure == KinisiFailure::SENSOR_NOT_AVAILABLE && c.ready());
     auto clock=c.get_time_status();
     assert(c.lastError().failure==KinisiFailure::NONE);
     assert(clock.clock_mode==0 && clock.clock_quality==1 && clock.interval_ms==30000);

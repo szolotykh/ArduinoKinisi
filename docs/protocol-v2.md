@@ -1,15 +1,86 @@
 # Arduino API v2
 
 Call `begin(timeout_ms=1000, heartbeat_timeout_ms=500)` before commands. It starts Wire,
-identifies the SDK as Arduino 2.3.1, reads the controller identity, and waits for
+identifies the SDK as Arduino 2.5.0, reads the controller identity, and waits for
 READY. `boardInfo()` exposes hardware revision, protocol version and firmware Git
 build identity; `ready()` reports session readiness.
+
+The library includes protocol 2.5 commands while accepting firmware 2.1+ within
+protocol major 2. Major versions break existing wire interfaces and must match.
+Minor versions add compatible commands; patch versions provide compatible fixes
+and do not block connection. New commands are gated individually. Protocol
+versions are independent of SDK releases and physical board revisions; INIT
+does not translate between major versions.
 
 The SDK advertises subscription support and **no wall-clock capability**. The board
 uses uptime and skips time-sync exchanges, including periodic sync. Call `poll()`
 frequently from `loop()` to service [heartbeat and subscriptions](connection-monitoring.md).
 `get_time_status()` reports the selected mode and default 30,000-ms interval;
 changing that interval does not enable wall-clock sync in an uptime session.
+
+## Bundled board profiles and sensors
+
+`const KinisiBoardProfile* profile = controller.boardProfile()` returns the
+profile selected from the INIT board model and complete hardware revision, or
+`nullptr` before successful setup and for unknown boards. A new `begin()` and
+session failures clear it. Treat the pointer as a view of the current session;
+copy the struct if a historical snapshot is needed. No other revision is used
+as a fallback. Unknown boards can still use compatible low-level commands.
+
+Profiles contain `model`, `major`, `minor`, `patch`, `resources` (motors,
+encoders, GPIO and status LED counts), `motor_features`, temperature IDs and
+IMU features. Use `resources.motors`, `temperature_count` and `imu_count` to
+delimit their arrays. Each IMU has an ID and accelerometer/gyroscope flags.
+Profiles omit pins, buses, addresses, control models and component values.
+Per-motor `current_sense` and `current_limit` indicate fitted hardware; current
+measurement and programmable-current commands remain unimplemented in firmware.
+
+The generated tables are read-only and stored in `PROGMEM` on AVR. Lookup copies
+one selected profile into the controller; no heap allocation or JSON parsing is
+needed. `tools/update-board-profiles.py` imports the public firmware JSON using
+an explicit local path or branch, following the same workflow as command updates.
+Custom runtime profiles are not supported.
+
+```cpp
+const KinisiBoardProfile* profile = controller.boardProfile();
+if (profile) {
+    Serial.println(profile->resources.motors);
+}
+if (controller.supportsSensor(KinisiSensor::TEMPERATURE)) {
+    double celsius = controller.get_temperature(0);
+    if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(celsius);
+}
+if (controller.supportsSensor(KinisiSensor::IMU)) {
+    imu_sample sample = controller.get_imu(0);
+    if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(sample.acceleration_z);
+}
+```
+
+`profile->hasSensor(KinisiSensor::TEMPERATURE, index)` and
+`profile->hasSensor(KinisiSensor::IMU, index)` check physical presence only.
+`controller.supportsSensor(kind, index=0)` additionally checks session readiness,
+firmware protocol and Wire buffer capacity. It returns false for unknown boards;
+direct reads on those boards rely on firmware availability errors.
+
+| Method | Required protocol | Reply frame | Result |
+| --- | --- | --- | --- |
+| `get_temperature(uint8_t sensor_index)` | 2.4+ | 12 bytes | Celsius `double` |
+| `get_imu(uint8_t sensor_index)` | 2.5+ | 52 bytes | `imu_sample` |
+
+`imu_sample` has `acceleration_x`, `acceleration_y`, `acceleration_z` in m/s² and
+`angular_velocity_x`, `angular_velocity_y`, `angular_velocity_z` in rad/s.
+Acceleration includes gravity; readings use native sensor axes. Accelerometer
+and gyroscope samples are independent, without calibration, orientation or fusion.
+The wire format is six binary64 values even on AVR, where native `double`
+rounds them to 32-bit precision.
+
+Older firmware produces local `UNSUPPORTED_COMMAND`; known absent sensors or
+indices produce local `SENSOR_NOT_AVAILABLE`. Insufficient Wire capacity produces
+`FRAME_TOO_LARGE`. These checks happen before transmission and keep the session
+usable. Sensor startup, absence or I/O failures reported by firmware use
+`KinisiFailure::CONTROLLER` with `SAMPLE_NOT_AVAILABLE`, `SENSOR_NOT_AVAILABLE`
+or `INTERNAL_ERROR`. Non-finite readings are rejected as `MALFORMED_RESPONSE`,
+invalidating the session. Always inspect `lastError()` before using a getter result.
 
 ## Requests and failures
 
@@ -48,7 +119,8 @@ checks request and response sizes before transmitting, and returns
 `KinisiFailure::FRAME_TOO_LARGE` if either exceeds the configured Wire capacity.
 
 A default 32-byte AVR Wire buffer supports INIT, encoder odometry, and many basic
-commands. It cannot carry, for example, the 38-byte platform-odometry reply or
+commands, including temperature. It cannot carry the 52-byte IMU reply,
+the 38-byte platform-odometry reply or
 the 61-byte motor-controller-state reply. A **64-byte TX and RX buffer** supports motor position PID. Platform position
 PID initialization needs a **100-byte TX buffer** (a 128-byte Wire configuration
 is suitable); the P-only platform setup needs 52 bytes. Use a core with sufficient buffers or configure its actual
@@ -75,8 +147,13 @@ The native suite uses fake Arduino/Wire interfaces; it does not validate voltage
 levels, actual I2C clock stretching, encoders, or motor movement.
 
 To compile against the real Arduino Uno core, run
-`pio run -d tests/avr -e uno`. This compiles the AVR numeric-conversion path;
+`pio run -d tests/avr -e uno`. This compiles AVR numeric conversions and flash profile lookup;
 it does not run the sketch or flash a board.
+
+Host tests cover profile import validation, deterministic generation, exact
+board matching, firmware gates, sensor payloads/errors, session cleanup and
+32/52/64/128-byte Wire capacities. Optional sibling firmware tests exercise the
+production C INIT/READY and framing code.
 
 ## Position and velocity tuning
 

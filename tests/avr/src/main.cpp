@@ -19,6 +19,12 @@ void setup() {
         Serial.println("FAIL binary64 decoding");
         return;
     }
+    KinisiBoardProfile profile;
+    if (!kinisiLookupBoardProfile(1, 0, 4, 0, profile) || profile.resources.motors != 4 ||
+            !profile.hasSensor(KinisiSensor::IMU)) {
+        Serial.println("FAIL bundled flash profile");
+        return;
+    }
     if (!controller.begin()) {
         Serial.println("Controller unavailable");
         return;
@@ -27,6 +33,14 @@ void setup() {
     Serial.println(board.board_minor);
     time_status clock = controller.get_time_status();
     if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(clock.clock_mode);
+    if (controller.boardProfile()) Serial.println(controller.boardProfile()->resources.encoders);
+    if (controller.supportsSensor(KinisiSensor::TEMPERATURE)) {
+        double temperature = controller.get_temperature(0);
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(temperature);
+    }
+    // Compiles the IMU getter too; a default Uno rejects this before I2C (32-byte Wire).
+    imu_sample sample = controller.get_imu(0);
+    if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(sample.acceleration_z);
 }
 
 /** Compile the cooperative heartbeat service without enabling motors. */

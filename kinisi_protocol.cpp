@@ -7,7 +7,7 @@
 
 /** Initialize local state without starting any bus traffic. */
 KinisiProtocol::KinisiProtocol(uint8_t address)
-    : address_(address), next_id_(1), timeout_ms_(1000), ready_(false), identity_(), error_(),
+    : address_(address), next_id_(1), timeout_ms_(1000), ready_(false), identity_(), profile_(), profile_known_(false), error_(),
       heartbeat_ms_(0), last_sent_ms_(0), last_poll_ms_(0), subscription_ms_{}, sample_mask_(0),
       encoder_samples_{}, platform_sample_() {}
 
@@ -26,6 +26,7 @@ bool KinisiProtocol::fail(KinisiFailure failure, uint8_t command, uint16_t id, K
         code == KinisiErrorCode::INIT_REQUIRED || code == KinisiErrorCode::CLOCK_NOT_READY)
     {
         ready_ = false;
+        identity_ = {}; profile_ = {}; profile_known_ = false;
         heartbeat_ms_ = 0; sample_mask_ = 0;
         memset(subscription_ms_, 0, sizeof(subscription_ms_));
     }
@@ -87,13 +88,14 @@ bool KinisiProtocol::receive(uint8_t expected_command, uint8_t failed_command, u
 bool KinisiProtocol::begin(uint32_t timeout_ms, uint32_t heartbeat_timeout_ms) {
     ready_ = false;
     identity_ = {};
+    profile_ = {}; profile_known_ = false;
     error_ = {};
     heartbeat_ms_ = 0; sample_mask_ = 0;
     memset(subscription_ms_, 0, sizeof(subscription_ms_));
     timeout_ms_ = timeout_ms ? timeout_ms : 1000;
     kinisiWireBegin();
     uint16_t id = allocateId();
-    const uint8_t init[] = {3, 2, 3, 1, 2, 1, 0, 2};
+    const uint8_t init[] = {3, 2, 5, 0, 2, 1, 0, 2};
     uint8_t response[15];
     uint32_t started = millis();
     if (!send(KINISI_INIT, id, init, sizeof(init), sizeof(response)) ||
@@ -118,7 +120,19 @@ bool KinisiProtocol::begin(uint32_t timeout_ms, uint32_t heartbeat_timeout_ms) {
         kinisi_codec::writeUnsigned(config + 1, heartbeat_timeout_ms, 4);
         if (!request(KINISI_SET_HEARTBEAT_CONFIG, config, 5, nullptr, 0)) { ready_ = false; return false; }
     }
+    profile_known_ = kinisiLookupBoardProfile(identity_.board_model, identity_.board_major,
+        identity_.board_minor, identity_.board_patch, profile_);
     return true;
+}
+
+bool KinisiProtocol::supportsSensor(KinisiSensor kind, uint8_t index) const {
+    if (!ready_ || !profile_known_ || !profile_.hasSensor(kind, index) || identity_.protocol_major != 2)
+        return false;
+    switch (kind) {
+        case KinisiSensor::TEMPERATURE: return identity_.protocol_minor >= 4 && KINISI_WIRE_BUFFER_SIZE >= 12;
+        case KinisiSensor::IMU: return identity_.protocol_minor >= 5 && KINISI_WIRE_BUFFER_SIZE >= 52;
+        default: return false;
+    }
 }
 
 /** Reject invalid velocity gains and integral limits before transmission. */
@@ -144,16 +158,27 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         case KINISI_SET_PLATFORM_POSITION: required_minor = 2; break;
         case KINISI_INITIALIZE_MOTOR_POSITION_PID_CONTROLLER:
         case KINISI_INITIALIZE_PLATFORM_POSITION_PID_CONTROLLER: required_minor = 3; break;
+        case KINISI_GET_TEMPERATURE: required_minor = 4; break;
+        case KINISI_GET_IMU: required_minor = 5; break;
         default: break;
     }
     if (identity_.protocol_minor < required_minor)
         return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+    const bool sensor_read = command == KINISI_GET_TEMPERATURE || command == KINISI_GET_IMU;
+    if (sensor_read && profile_known_ && !profile_.hasSensor(
+            command == KINISI_GET_TEMPERATURE ? KinisiSensor::TEMPERATURE : KinisiSensor::IMU, payload[0]))
+        return fail(KinisiFailure::SENSOR_NOT_AVAILABLE, command, 0, KinisiErrorCode::SENSOR_NOT_AVAILABLE);
     if (command == KINISI_SUBSCRIBE_ODOMETRY && length == 5 && payload[0] == 4 && KINISI_WIRE_BUFFER_SIZE < 38)
         return fail(KinisiFailure::FRAME_TOO_LARGE, command, 0);
     uint16_t id = allocateId();
     uint32_t started = millis();
     if (!send(command, id, payload, length, response_length) ||
         !receive(command, command, id, response, response_length, started)) return false;
+    if (sensor_read) {
+        for (uint8_t offset = 0; offset < response_length; offset += 8)
+            if (!isfinite(kinisi_codec::readDouble(response + offset)))
+                return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    }
     if (command == KINISI_SET_HEARTBEAT_CONFIG) {
         heartbeat_ms_ = payload[0] ? uint32_t(kinisi_codec::readUnsigned(payload + 1, 4)) : 0;
         if (!heartbeat_ms_) { memset(subscription_ms_, 0, sizeof(subscription_ms_)); sample_mask_ = 0; }

@@ -4,12 +4,13 @@
 #define KINISI_PROTOCOL_H
 #include "i2cutils.h"
 #include "kinisi_types.h"
+#include "kinisi_board_profiles.h"
 
 /** Local failures are separate from the controller's shared wire error codes. */
 enum class KinisiFailure : uint8_t {
     NONE, NOT_READY, TIMEOUT, TRANSPORT, FRAME_TOO_LARGE,
     MALFORMED_RESPONSE, INCOMPATIBLE_PROTOCOL, CONTROLLER,
-    INVALID_ARGUMENT, UNSUPPORTED_COMMAND
+    INVALID_ARGUMENT, UNSUPPORTED_COMMAND, SENSOR_NOT_AVAILABLE
 };
 /** Result of the most recent operation; zero-valued getter results may be errors. */
 struct KinisiError {
@@ -35,6 +36,10 @@ public:
     bool ready() const { return ready_; }
     /** Board identity from the most recent successful INIT. */
     const init_response& boardInfo() const { return identity_; }
+    /** Exact bundled hardware profile, or nullptr before READY/on unknown boards. */
+    const KinisiBoardProfile* boardProfile() const { return profile_known_ ? &profile_ : nullptr; }
+    /** Check fitted hardware, firmware protocol, and configured Wire capacity. */
+    bool supportsSensor(KinisiSensor kind, uint8_t index = 0) const;
     /** Failure of the most recent operation; inspect after every value-returning getter. */
     const KinisiError& lastError() const { return error_; }
 protected:
@@ -49,6 +54,8 @@ private:
     uint32_t timeout_ms_;
     bool ready_;
     init_response identity_;
+    KinisiBoardProfile profile_;
+    bool profile_known_;
     KinisiError error_;
     uint32_t heartbeat_ms_, last_sent_ms_, last_poll_ms_;
     uint32_t subscription_ms_[5];
