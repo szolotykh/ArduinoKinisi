@@ -9,7 +9,18 @@
 KinisiProtocol::KinisiProtocol(uint8_t address)
     : address_(address), next_id_(1), timeout_ms_(1000), ready_(false), identity_(), profile_(), profile_known_(false), error_(),
       heartbeat_ms_(0), last_sent_ms_(0), last_poll_ms_(0), subscription_ms_{}, sample_mask_(0),
-      encoder_samples_{}, platform_sample_() {}
+      encoder_samples_{}, platform_sample_(), subscriptions_{} {}
+
+void KinisiProtocol::clearSubscriptions() {
+    memset(subscriptions_, 0, sizeof(subscriptions_));
+}
+
+int KinisiProtocol::findSubscription(KinisiTopic topic, uint8_t index) const {
+    for (uint8_t i = 0; i < KINISI_MAX_SUBSCRIPTIONS; ++i)
+        if (subscriptions_[i].interval_ms && subscriptions_[i].sample.topic == topic && subscriptions_[i].sample.index == index)
+            return i;
+    return -1;
+}
 
 /** Advance the request counter; zero is reserved by API v2. */
 uint16_t KinisiProtocol::allocateId() {
@@ -29,6 +40,7 @@ bool KinisiProtocol::fail(KinisiFailure failure, uint8_t command, uint16_t id, K
         identity_ = {}; profile_ = {}; profile_known_ = false;
         heartbeat_ms_ = 0; sample_mask_ = 0;
         memset(subscription_ms_, 0, sizeof(subscription_ms_));
+        clearSubscriptions();
     }
     return false;
 }
@@ -66,7 +78,7 @@ bool KinisiProtocol::receive(uint8_t expected_command, uint8_t failed_command, u
         if (count == 0) { delay(1); continue; }
         if (count < 4 || frame[0] < 3 || uint16_t(frame[0]) + 1 > uint16_t(count))
             return fail(KinisiFailure::MALFORMED_RESPONSE, failed_command, id);
-        if (frame[1] == KINISI_ENCODER_ODOMETRY_EVENT || frame[1] == KINISI_PLATFORM_ODOMETRY_EVENT) {
+        if (frame[1] == KINISI_ENCODER_ODOMETRY_EVENT || frame[1] == KINISI_PLATFORM_ODOMETRY_EVENT || frame[1] == KINISI_TELEMETRY_EVENT) {
             if (!telemetry(frame, frame[0] + 1)) return fail(KinisiFailure::MALFORMED_RESPONSE, failed_command, id);
             continue;
         }
@@ -92,6 +104,7 @@ bool KinisiProtocol::begin(uint32_t timeout_ms, uint32_t heartbeat_timeout_ms) {
     error_ = {};
     heartbeat_ms_ = 0; sample_mask_ = 0;
     memset(subscription_ms_, 0, sizeof(subscription_ms_));
+    clearSubscriptions();
     timeout_ms_ = timeout_ms ? timeout_ms : 1000;
     kinisiWireBegin();
     uint16_t id = allocateId();
@@ -135,6 +148,27 @@ bool KinisiProtocol::supportsSensor(KinisiSensor kind, uint8_t index) const {
     }
 }
 
+bool KinisiProtocol::supportsTopic(KinisiTopic topic, uint8_t index) const {
+    uint8_t size; uint32_t minimum;
+    if (!ready_ || !profile_known_ || identity_.protocol_major != 2 || identity_.protocol_minor < 6 ||
+            !kinisiTopicInfo(topic, index, size, minimum) || size + 6 > KINISI_WIRE_BUFFER_SIZE || size + 6 > 64)
+        return false;
+    switch (topic) {
+        case KinisiTopic::ENCODER_ODOMETRY: return index < profile_.resources.encoders;
+        case KinisiTopic::PLATFORM_ODOMETRY: return true;
+        case KinisiTopic::TEMPERATURE: return profile_.hasSensor(KinisiSensor::TEMPERATURE, index);
+        case KinisiTopic::IMU: return profile_.hasSensor(KinisiSensor::IMU, index);
+        default: return false;
+    }
+}
+
+bool KinisiProtocol::getSubscriptionSample(KinisiTopic topic, uint8_t index, KinisiTelemetrySample& sample) const {
+    int slot = findSubscription(topic, index);
+    if (!ready_ || slot < 0 || !subscriptions_[slot].has_sample) return false;
+    sample = subscriptions_[slot].sample;
+    return true;
+}
+
 /** Reject invalid velocity gains and integral limits before transmission. */
 bool KinisiProtocol::validateVelocityTuning(uint8_t command, double kp, double ki, double kd, double limit) {
     if (!isfinite(kp) || kp < 0 || !isfinite(ki) || ki < 0 ||
@@ -160,10 +194,34 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         case KINISI_INITIALIZE_PLATFORM_POSITION_PID_CONTROLLER: required_minor = 3; break;
         case KINISI_GET_TEMPERATURE: required_minor = 4; break;
         case KINISI_GET_IMU: required_minor = 5; break;
+        case KINISI_SUBSCRIBE:
+        case KINISI_UNSUBSCRIBE: required_minor = 6; break;
         default: break;
     }
     if (identity_.protocol_minor < required_minor)
         return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+    int subscription_slot = -1;
+    if (command == KINISI_SUBSCRIBE || command == KINISI_UNSUBSCRIBE) {
+        const KinisiTopic topic = static_cast<KinisiTopic>(payload[0]);
+        uint8_t size; uint32_t minimum;
+        if (!kinisiTopicInfo(topic, payload[1], size, minimum))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0);
+        subscription_slot = findSubscription(topic, payload[1]);
+        if (command == KINISI_SUBSCRIBE) {
+            uint32_t interval = uint32_t(kinisi_codec::readUnsigned(payload + 2, 4));
+            if (interval < minimum || interval > 3600000)
+                return fail(KinisiFailure::INVALID_ARGUMENT, command, 0);
+            if (size + 6 > KINISI_WIRE_BUFFER_SIZE || size + 6 > 64)
+                return fail(KinisiFailure::FRAME_TOO_LARGE, command, 0);
+            if (profile_known_ && !supportsTopic(topic, payload[1]))
+                return fail(KinisiFailure::SENSOR_NOT_AVAILABLE, command, 0);
+            if (subscription_slot < 0) {
+                for (uint8_t i = 0; i < KINISI_MAX_SUBSCRIPTIONS; ++i)
+                    if (!subscriptions_[i].interval_ms) { subscription_slot = i; break; }
+            }
+            if (subscription_slot < 0) return fail(KinisiFailure::SUBSCRIPTION_LIMIT, command, 0);
+        }
+    }
     const bool sensor_read = command == KINISI_GET_TEMPERATURE || command == KINISI_GET_IMU;
     if (sensor_read && profile_known_ && !profile_.hasSensor(
             command == KINISI_GET_TEMPERATURE ? KinisiSensor::TEMPERATURE : KinisiSensor::IMU, payload[0]))
@@ -181,13 +239,32 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     }
     if (command == KINISI_SET_HEARTBEAT_CONFIG) {
         heartbeat_ms_ = payload[0] ? uint32_t(kinisi_codec::readUnsigned(payload + 1, 4)) : 0;
-        if (!heartbeat_ms_) { memset(subscription_ms_, 0, sizeof(subscription_ms_)); sample_mask_ = 0; }
+        if (!heartbeat_ms_) { memset(subscription_ms_, 0, sizeof(subscription_ms_)); sample_mask_ = 0; clearSubscriptions(); }
+    } else if (command == KINISI_SUBSCRIBE || command == KINISI_UNSUBSCRIBE) {
+        KinisiTopic topic = static_cast<KinisiTopic>(payload[0]);
+        if (subscription_slot >= 0) {
+            SubscriptionSlot& slot = subscriptions_[subscription_slot];
+            slot = {};
+            if (command == KINISI_SUBSCRIBE) {
+                slot.interval_ms = uint32_t(kinisi_codec::readUnsigned(payload + 2, 4));
+                slot.sample.topic = topic;
+                slot.sample.index = payload[1];
+                last_poll_ms_ = millis();
+            }
+        }
+        int source = topic == KinisiTopic::PLATFORM_ODOMETRY ? 4 : topic == KinisiTopic::ENCODER_ODOMETRY ? payload[1] : -1;
+        if (source >= 0) { subscription_ms_[source] = 0; sample_mask_ &= ~(1U << source); }
     } else if (command == KINISI_SUBSCRIBE_ODOMETRY && payload[0] < 5) {
         subscription_ms_[payload[0]] = uint32_t(kinisi_codec::readUnsigned(payload + 1, 4));
         last_poll_ms_ = millis();
     } else if (command == KINISI_UNSUBSCRIBE_ODOMETRY && payload[0] < 5) {
         subscription_ms_[payload[0]] = 0;
         sample_mask_ &= ~(1U << payload[0]);
+    }
+    if ((command == KINISI_SUBSCRIBE_ODOMETRY || command == KINISI_UNSUBSCRIBE_ODOMETRY) && payload[0] < 5) {
+        KinisiTopic topic = payload[0] == 4 ? KinisiTopic::PLATFORM_ODOMETRY : KinisiTopic::ENCODER_ODOMETRY;
+        int slot = findSubscription(topic, payload[0] == 4 ? 0 : payload[0]);
+        if (slot >= 0) subscriptions_[slot] = {};
     }
     return true;
 }
@@ -201,6 +278,11 @@ bool KinisiProtocol::poll() {
         if (subscription_ms_[i]) {
             ++count;
             if (subscription_ms_[i] < shortest) shortest = subscription_ms_[i];
+        }
+    for (uint8_t i = 0; i < KINISI_MAX_SUBSCRIPTIONS; ++i)
+        if (subscriptions_[i].interval_ms) {
+            ++count;
+            if (subscriptions_[i].interval_ms < shortest) shortest = subscriptions_[i].interval_ms;
         }
     // Service each subscribed source; firmware owns the independent delivery deadlines.
     uint32_t service_ms = count ? shortest / count : shortest;
@@ -216,6 +298,21 @@ bool KinisiProtocol::poll() {
 
 /** Decode packed wire values explicitly, including binary64 on AVR's 32-bit double. */
 bool KinisiProtocol::telemetry(const uint8_t* frame, uint8_t size) {
+    if (frame[1] == KINISI_TELEMETRY_EVENT) {
+        if (kinisi_codec::readUnsigned(frame + 2, 2) || size < 6) return false;
+        KinisiTopic topic = static_cast<KinisiTopic>(frame[4]);
+        uint8_t payload_size; uint32_t minimum;
+        // Unknown future topics are ignored; malformed known topics are errors.
+        if (!kinisiTopicInfo(topic, 0, payload_size, minimum)) return true;
+        KinisiTelemetrySample sample = {};
+        if (!kinisiDecodeTelemetry(topic, frame[5], frame + 6, size - 6, sample)) return false;
+        int slot = findSubscription(topic, frame[5]);
+        if (ready_ && slot >= 0) {
+            subscriptions_[slot].sample = sample;
+            subscriptions_[slot].has_sample = true;
+        }
+        return true;
+    }
     bool encoder = frame[1] == KINISI_ENCODER_ODOMETRY_EVENT;
     if (kinisi_codec::readUnsigned(frame + 2, 2) || size != (encoder ? 23 : 38)) return false;
     uint8_t source = encoder ? frame[4] : 4;

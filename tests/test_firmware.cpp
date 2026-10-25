@@ -50,6 +50,15 @@ int main() {
     assert(sample.clock_mode == 0 && sample.angle == 1.25 && sample.timestamp_us % 20000 == 0);
     assert(c.unsubscribe_odometry(0));
     assert(!c.getSubscribedEncoderOdometry(0,sample));
+    assert(c.subscribe(KinisiTopic::ENCODER_ODOMETRY, 0, 100));
+    bridge_advance(100000); fake_millis += 100;
+    assert(c.poll());
+    KinisiTelemetrySample telemetry;
+    assert(c.getSubscriptionSample(KinisiTopic::ENCODER_ODOMETRY, 0, telemetry));
+    assert(telemetry.data.encoder_odometry.angle == 1.25);
+    assert(telemetry.data.encoder_odometry.clock_quality == 1);
+    assert(c.unsubscribe(KinisiTopic::ENCODER_ODOMETRY, 0));
+    assert(!c.getSubscriptionSample(KinisiTopic::ENCODER_ODOMETRY, 0, telemetry));
     unsigned previous = bridge_stops();
     bridge_advance(500000); fake_millis += 500;
     assert(!c.poll() && !c.ready());
