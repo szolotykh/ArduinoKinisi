@@ -41,7 +41,14 @@ void setup() {
     // Compiles the IMU getter too; a default Uno rejects this before I2C (32-byte Wire).
     imu_sample sample = controller.get_imu(0);
     if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(sample.acceleration_z);
+    if (controller.supportsTopic(KinisiTopic::TEMPERATURE))
+        controller.subscribe(KinisiTopic::TEMPERATURE, 0, 250);
 }
 
 /** Compile the cooperative heartbeat service without enabling motors. */
-void loop() { controller.poll(); }
+void loop() {
+    controller.poll();
+    KinisiTelemetrySample sample;
+    if (controller.getSubscriptionSample(KinisiTopic::TEMPERATURE, 0, sample))
+        Serial.println(sample.data.temperature.celsius);
+}

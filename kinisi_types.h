@@ -53,9 +53,13 @@ static const uint8_t KINISI_GET_TIME_STATUS = 0x75;
 static const uint8_t KINISI_PING = 0x76;
 static const uint8_t KINISI_SET_HEARTBEAT_CONFIG = 0x77;
 static const uint8_t KINISI_GET_HEARTBEAT_CONFIG = 0x78;
+/** @deprecated Retired since protocol 2.6.0. Use SUBSCRIBE. Kept for compatibility; eligible for removal in protocol 3.0.0. */
 static const uint8_t KINISI_SUBSCRIBE_ODOMETRY = 0x79;
+/** @deprecated Retired since protocol 2.6.0. Use UNSUBSCRIBE. Kept for compatibility; eligible for removal in protocol 3.0.0. */
 static const uint8_t KINISI_UNSUBSCRIBE_ODOMETRY = 0x7a;
+/** @deprecated Retired since protocol 2.6.0. Use TELEMETRY_EVENT. Kept for compatibility; eligible for removal in protocol 3.0.0. */
 static const uint8_t KINISI_ENCODER_ODOMETRY_EVENT = 0x7b;
+/** @deprecated Retired since protocol 2.6.0. Use TELEMETRY_EVENT. Kept for compatibility; eligible for removal in protocol 3.0.0. */
 static const uint8_t KINISI_PLATFORM_ODOMETRY_EVENT = 0x7c;
 static const uint8_t KINISI_POLL_TELEMETRY = 0x7d;
 static const uint8_t KINISI_INITIALIZE_MOTOR_POSITION_CONTROLLER = 0x0C;
@@ -67,6 +71,9 @@ static const uint8_t KINISI_RESET_PLATFORM_POSITION = 0x4C;
 static const uint8_t KINISI_SET_PLATFORM_POSITION = 0x4D;
 static const uint8_t KINISI_INITIALIZE_MOTOR_POSITION_PID_CONTROLLER = 0x10;
 static const uint8_t KINISI_INITIALIZE_PLATFORM_POSITION_PID_CONTROLLER = 0x4E;
+static const uint8_t KINISI_SUBSCRIBE = 0x80;
+static const uint8_t KINISI_UNSUBSCRIBE = 0x81;
+static const uint8_t KINISI_TELEMETRY_EVENT = 0x82;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -87,6 +94,7 @@ enum class KinisiErrorCode : uint8_t {
     CONTROLLER_NOT_INITIALIZED = 14, // Start or initialize the closed-loop controller before setting its target.
     INIT_REQUIRED = 15, // Send a valid INIT request before performing this connection-dependent operation.
     SENSOR_NOT_AVAILABLE = 16, // The selected sensor is not defined on this board.
+    SUBSCRIPTION_LIMIT = 17, // This connection has no free subscription slots; unsubscribe an existing source first.
 };
 
 /** The state of the controller for the specified motor. */
@@ -169,4 +177,47 @@ struct imu_sample {
     double angular_velocity_y; ///< Y angular velocity in rad/s.
     double angular_velocity_z; ///< Z angular velocity in rad/s.
 };
+
+/** Timestamped temperature register reading in degrees Celsius. */
+struct temperature_sample {
+    uint64_t timestamp_us; ///< Sensor register-read completion timestamp in the selected clock domain; not a hardware conversion timestamp.
+    uint8_t clock_mode; ///< 0 uptime, 1 Unix wall time.
+    uint8_t clock_quality; ///< 1 valid, 2 stale.
+    double celsius; ///< Temperature in degrees Celsius.
+};
+
+/** Timestamped IMU register reading. Acceleration and angular velocity are not synchronized with each other. */
+struct imu_telemetry_sample {
+    uint64_t timestamp_us; ///< Sensor register-read completion timestamp in the selected clock domain; not a hardware conversion timestamp.
+    uint8_t clock_mode; ///< 0 uptime, 1 Unix wall time.
+    uint8_t clock_quality; ///< 1 valid, 2 stale.
+    double acceleration_x; ///< X acceleration in m/s^2, including gravity.
+    double acceleration_y; ///< Y acceleration in m/s^2, including gravity.
+    double acceleration_z; ///< Z acceleration in m/s^2, including gravity.
+    double angular_velocity_x; ///< X angular velocity in rad/s.
+    double angular_velocity_y; ///< Y angular velocity in rad/s.
+    double angular_velocity_z; ///< Z angular velocity in rad/s.
+};
+
+/** Stable wire identifiers for telemetry sources. */
+enum class KinisiTopic : uint8_t {
+    ENCODER_ODOMETRY = 1,
+    PLATFORM_ODOMETRY = 2,
+    TEMPERATURE = 3,
+    IMU = 4,
+};
+
+/** Only the union member selected by topic is valid. */
+struct KinisiTelemetrySample {
+    KinisiTopic topic;
+    uint8_t index;
+    union {
+        encoder_odometry_sample encoder_odometry;
+        platform_odometry_sample platform_odometry;
+        temperature_sample temperature;
+        imu_telemetry_sample imu;
+    } data;
+};
+bool kinisiTopicInfo(KinisiTopic topic, uint8_t index, uint8_t& size, uint32_t& minimum_ms);
+bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payload, uint8_t size, KinisiTelemetrySample& sample);
 #endif

@@ -5,7 +5,7 @@ identifies the SDK as Arduino 2.5.0, reads the controller identity, and waits fo
 READY. `boardInfo()` exposes hardware revision, protocol version and firmware Git
 build identity; `ready()` reports session readiness.
 
-The library includes protocol 2.5 commands while accepting firmware 2.1+ within
+The library includes protocol 2.6 commands while accepting firmware 2.1+ within
 protocol major 2. Major versions break existing wire interfaces and must match.
 Minor versions add compatible commands; patch versions provide compatible fixes
 and do not block connection. New commands are gated individually. Protocol

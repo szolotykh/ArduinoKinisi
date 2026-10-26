@@ -12,6 +12,11 @@ profile and `supportsSensor()` checks sensor hardware, firmware protocol and
 Wire capacity. Profiles compile into C++ tables, stored in flash on AVR, with
 no runtime JSON parser or download.
 
+Use `subscribe(KinisiTopic::TEMPERATURE, 0, 250)`, service `poll()` in `loop()`,
+and read `getSubscriptionSample()` for streamed values. The same API covers
+encoder odometry, platform odometry, temperature, and IMU. See
+[subscriptions](docs/connection-monitoring.md) for buffer requirements and samples.
+
 ## Examples
 Below is the example of using this library to control the status LED on the kinisi motion controller:
 

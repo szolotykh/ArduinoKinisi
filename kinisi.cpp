@@ -1,6 +1,69 @@
 // Generated from tools/commands.json; edit the schema or generator instead.
 #include "kinisi.h"
 #include "kinisi_codec.h"
+#include <math.h>
+
+bool kinisiTopicInfo(KinisiTopic topic, uint8_t index, uint8_t& size, uint32_t& minimum_ms) {
+    switch (topic) {
+        case KinisiTopic::ENCODER_ODOMETRY: size = 18; minimum_ms = 2; return index <= 3;
+        case KinisiTopic::PLATFORM_ODOMETRY: size = 34; minimum_ms = 2; return index <= 0;
+        case KinisiTopic::TEMPERATURE: size = 18; minimum_ms = 250; return true;
+        case KinisiTopic::IMU: size = 58; minimum_ms = 10; return true;
+        default: return false;
+    }
+}
+
+bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payload, uint8_t length, KinisiTelemetrySample& sample) {
+    uint8_t size; uint32_t minimum;
+    if (!kinisiTopicInfo(topic, index, size, minimum) || length != size ||
+        payload[8] > 1 || payload[9] < 1 || payload[9] > 2) return false;
+    sample.topic = topic; sample.index = index;
+    switch (topic) {
+        case KinisiTopic::ENCODER_ODOMETRY:
+            sample.data.encoder_odometry.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(payload + 0, 8));
+            sample.data.encoder_odometry.clock_mode = static_cast<uint8_t>(kinisi_codec::readUnsigned(payload + 8, 1));
+            sample.data.encoder_odometry.clock_quality = static_cast<uint8_t>(kinisi_codec::readUnsigned(payload + 9, 1));
+            sample.data.encoder_odometry.angle = kinisi_codec::readDouble(payload + 10);
+            if (!isfinite(sample.data.encoder_odometry.angle)) return false;
+            return true;
+        case KinisiTopic::PLATFORM_ODOMETRY:
+            sample.data.platform_odometry.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(payload + 0, 8));
+            sample.data.platform_odometry.clock_mode = static_cast<uint8_t>(kinisi_codec::readUnsigned(payload + 8, 1));
+            sample.data.platform_odometry.clock_quality = static_cast<uint8_t>(kinisi_codec::readUnsigned(payload + 9, 1));
+            sample.data.platform_odometry.x = kinisi_codec::readDouble(payload + 10);
+            if (!isfinite(sample.data.platform_odometry.x)) return false;
+            sample.data.platform_odometry.y = kinisi_codec::readDouble(payload + 18);
+            if (!isfinite(sample.data.platform_odometry.y)) return false;
+            sample.data.platform_odometry.t = kinisi_codec::readDouble(payload + 26);
+            if (!isfinite(sample.data.platform_odometry.t)) return false;
+            return true;
+        case KinisiTopic::TEMPERATURE:
+            sample.data.temperature.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(payload + 0, 8));
+            sample.data.temperature.clock_mode = static_cast<uint8_t>(kinisi_codec::readUnsigned(payload + 8, 1));
+            sample.data.temperature.clock_quality = static_cast<uint8_t>(kinisi_codec::readUnsigned(payload + 9, 1));
+            sample.data.temperature.celsius = kinisi_codec::readDouble(payload + 10);
+            if (!isfinite(sample.data.temperature.celsius)) return false;
+            return true;
+        case KinisiTopic::IMU:
+            sample.data.imu.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(payload + 0, 8));
+            sample.data.imu.clock_mode = static_cast<uint8_t>(kinisi_codec::readUnsigned(payload + 8, 1));
+            sample.data.imu.clock_quality = static_cast<uint8_t>(kinisi_codec::readUnsigned(payload + 9, 1));
+            sample.data.imu.acceleration_x = kinisi_codec::readDouble(payload + 10);
+            if (!isfinite(sample.data.imu.acceleration_x)) return false;
+            sample.data.imu.acceleration_y = kinisi_codec::readDouble(payload + 18);
+            if (!isfinite(sample.data.imu.acceleration_y)) return false;
+            sample.data.imu.acceleration_z = kinisi_codec::readDouble(payload + 26);
+            if (!isfinite(sample.data.imu.acceleration_z)) return false;
+            sample.data.imu.angular_velocity_x = kinisi_codec::readDouble(payload + 34);
+            if (!isfinite(sample.data.imu.angular_velocity_x)) return false;
+            sample.data.imu.angular_velocity_y = kinisi_codec::readDouble(payload + 42);
+            if (!isfinite(sample.data.imu.angular_velocity_y)) return false;
+            sample.data.imu.angular_velocity_z = kinisi_codec::readDouble(payload + 50);
+            if (!isfinite(sample.data.imu.angular_velocity_z)) return false;
+            return true;
+        default: return false;
+    }
+}
 
 /** Encode GET_TEMPERATURE, match its reply, and decode the payload. */
 double KinisiController::get_temperature(uint8_t sensor_index) {
@@ -547,4 +610,21 @@ bool KinisiController::initialize_platform_position_pid_controller(double linear
     kinisi_codec::writeDouble(payload + 80, angular_kd);
     kinisi_codec::writeDouble(payload + 88, angular_integral_limit);
     return request(KINISI_INITIALIZE_PLATFORM_POSITION_PID_CONTROLLER, payload, 96, nullptr, 0);
+}
+
+/** Encode SUBSCRIBE, match its reply, and decode the payload. */
+bool KinisiController::subscribe(KinisiTopic topic_id, uint8_t index, uint32_t interval_ms) {
+    uint8_t payload[6] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(topic_id), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(index), 1);
+    kinisi_codec::writeUnsigned(payload + 2, static_cast<uint64_t>(interval_ms), 4);
+    return request(KINISI_SUBSCRIBE, payload, 6, nullptr, 0);
+}
+
+/** Encode UNSUBSCRIBE, match its reply, and decode the payload. */
+bool KinisiController::unsubscribe(KinisiTopic topic_id, uint8_t index) {
+    uint8_t payload[2] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(topic_id), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(index), 1);
+    return request(KINISI_UNSUBSCRIBE, payload, 2, nullptr, 0);
 }

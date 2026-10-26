@@ -46,7 +46,7 @@ def check_incompatible_schemas(schema, output):
 
 def check_future_schemas(schema, output):
     """New commands and minor/patch versions must not require editing the generator."""
-    for version in ['2.1.1', '2.2.0', '2.10.0']:
+    for version in ['2.6.1', '2.7.0', '2.10.0']:
         future = deepcopy(schema)
         future['version'] = version
         future['commands'].append({'command': 'GET_NEW_VALUE', 'code': '0x60',
@@ -56,6 +56,29 @@ def check_future_schemas(schema, output):
         assert 'uint16_t get_new_value();' in (output / 'kinisi.h').read_text(encoding='utf-8')
         assert 'KINISI_GET_NEW_VALUE = 0x60;' in (output / 'kinisi_types.h').read_text(encoding='utf-8')
     print('PASS future schema versions and new commands', flush=True)
+
+
+def check_metadata(schema, output):
+    names = ['kinisi.h', 'kinisi.cpp', 'kinisi_types.h', 'keywords.txt']
+    before = {name: (output / name).read_bytes() for name in names}
+    for mutate in (
+            lambda s: s['topics'][0].update(id=0),
+            lambda s: s['topics'][1].update(id=s['topics'][0]['id']),
+            lambda s: s['topics'][0].update(payload_type='absent'),
+            lambda s: s['topics'][0].update(min_interval_ms=0),
+            lambda s: next(c for c in s['commands'] if 'retired' in c)['retired'].update(removal_major=2),
+            lambda s: next(c for c in s['commands'] if 'retired' in c)['retired'].update(replacement='ABSENT')):
+        invalid = deepcopy(schema)
+        mutate(invalid)
+        try:
+            generate(invalid, output)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('Accepted invalid topic/lifecycle metadata')
+        assert before == {name: (output / name).read_bytes() for name in names}
+    assert '@deprecated Retired since protocol 2.6.0' in (output / 'kinisi.h').read_text(encoding='utf-8')
+    print('PASS invalid topic/lifecycle metadata preserves generated files', flush=True)
 
 
 def main():
@@ -72,6 +95,7 @@ def main():
             assert (out/name).read_text(encoding='utf-8') == (ROOT/name).read_text(encoding='utf-8'), f'Stale generated file: {name}'
         print('PASS deterministic schema regeneration', flush=True)
         check_incompatible_schemas(schema, out)
+        check_metadata(schema, out)
         check_future_schemas(schema, out / 'future')
         base = [compiler,'-std=c++11','-Wall','-Wextra','-Werror','-I'+str(ROOT/'tests/mocks'),'-I'+str(ROOT)]
         sources = [str(ROOT/p) for p in ['kinisi.cpp','kinisi_protocol.cpp','kinisi_board_profiles.cpp','i2cutils.cpp','tests/test_protocol.cpp']]
@@ -82,6 +106,9 @@ def main():
             sensor_exe=out/('sensors'+str(capacity)+('.exe' if os.name=='nt' else ''))
             subprocess.run(base+[f'-DKINISI_WIRE_BUFFER_SIZE={capacity}',*sources[:-1],str(ROOT/'tests/test_sensors.cpp'),'-o',str(sensor_exe)],check=True)
             subprocess.run([str(sensor_exe)],check=True,timeout=20)
+            telemetry_exe=out/('telemetry'+str(capacity)+('.exe' if os.name=='nt' else ''))
+            subprocess.run(base+[f'-DKINISI_WIRE_BUFFER_SIZE={capacity}',*sources[:-1],str(ROOT/'tests/test_subscriptions.cpp'),'-o',str(telemetry_exe)],check=True)
+            subprocess.run([str(telemetry_exe)],check=True,timeout=20)
         firmware = ROOT.parent / 'kinisi-motor-controller-firmware'
         cc = os.environ.get('CC') or shutil.which('gcc')
         if cc and (firmware/'lib/connection/connection.c').exists():

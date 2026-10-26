@@ -6,11 +6,17 @@
 #include "kinisi_types.h"
 #include "kinisi_board_profiles.h"
 
+// Bound RAM usage on small MCUs; configure consistently for the library and sketch.
+#ifndef KINISI_MAX_SUBSCRIPTIONS
+#define KINISI_MAX_SUBSCRIPTIONS 8
+#endif
+static_assert(KINISI_MAX_SUBSCRIPTIONS >= 1 && KINISI_MAX_SUBSCRIPTIONS <= 16, "Subscription capacity must be 1..16");
+
 /** Local failures are separate from the controller's shared wire error codes. */
 enum class KinisiFailure : uint8_t {
     NONE, NOT_READY, TIMEOUT, TRANSPORT, FRAME_TOO_LARGE,
     MALFORMED_RESPONSE, INCOMPATIBLE_PROTOCOL, CONTROLLER,
-    INVALID_ARGUMENT, UNSUPPORTED_COMMAND, SENSOR_NOT_AVAILABLE
+    INVALID_ARGUMENT, UNSUPPORTED_COMMAND, SENSOR_NOT_AVAILABLE, SUBSCRIPTION_LIMIT
 };
 /** Result of the most recent operation; zero-valued getter results may be errors. */
 struct KinisiError {
@@ -40,6 +46,10 @@ public:
     const KinisiBoardProfile* boardProfile() const { return profile_known_ ? &profile_ : nullptr; }
     /** Check fitted hardware, firmware protocol, and configured Wire capacity. */
     bool supportsSensor(KinisiSensor kind, uint8_t index = 0) const;
+    /** Check topic hardware, protocol and full event size against Wire capacity. */
+    bool supportsTopic(KinisiTopic topic, uint8_t index = 0) const;
+    /** Copy the latest sample without I/O; select the union member using its topic. */
+    bool getSubscriptionSample(KinisiTopic topic, uint8_t index, KinisiTelemetrySample& sample) const;
     /** Failure of the most recent operation; inspect after every value-returning getter. */
     const KinisiError& lastError() const { return error_; }
 protected:
@@ -62,6 +72,13 @@ private:
     uint8_t sample_mask_;
     encoder_odometry_sample encoder_samples_[4];
     platform_odometry_sample platform_sample_;
+    struct SubscriptionSlot {
+        uint32_t interval_ms;
+        bool has_sample;
+        KinisiTelemetrySample sample;
+    } subscriptions_[KINISI_MAX_SUBSCRIPTIONS];
+    int findSubscription(KinisiTopic topic, uint8_t index) const;
+    void clearSubscriptions();
     /** Validate and cache one unsolicited ID-zero telemetry frame. */
     bool telemetry(const uint8_t* frame, uint8_t size);
     /** Set structured failure; fatal transport/protocol failures invalidate the session. */
