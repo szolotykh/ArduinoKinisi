@@ -7,7 +7,7 @@
 TwoWire Wire;
 MockSerial Serial;
 uint32_t fake_millis = 0;
-static uint8_t board = 4, minor = 6, event_topic = 3, event_index = 0;
+static uint8_t board = 4, minor = 7, event_topic = 3, event_index = 0;
 static double value = 12.5;
 
 static std::vector<uint8_t> frame(uint8_t command, uint16_t id, std::vector<uint8_t> data = {}) {
@@ -38,14 +38,14 @@ static void respond(const std::vector<uint8_t>& r) {
     }
 }
 
-static void reset(uint8_t revision = 4, uint8_t protocol = 6) {
+static void reset(uint8_t revision = 4, uint8_t protocol = 7) {
     Wire = TwoWire(); fake_millis = 0; board = revision; minor = protocol; value = 12.5;
     Wire.responder = respond;
 }
 
 static void topics_and_buffers() {
     reset(); KinisiController c; assert(c.begin());
-    for (uint8_t topic = 1; topic <= 4; ++topic) {
+    for (uint8_t topic = 1; topic <= 5; ++topic) {
         KinisiTopic t = static_cast<KinisiTopic>(topic);
         uint8_t size; uint32_t minimum;
         assert(kinisiTopicInfo(t, 0, size, minimum));
@@ -70,6 +70,7 @@ static void topics_and_buffers() {
             case KinisiTopic::PLATFORM_ODOMETRY: assert(sample.data.platform_odometry.t == value); break;
             case KinisiTopic::TEMPERATURE: assert(sample.data.temperature.celsius == value); break;
             case KinisiTopic::IMU: assert(sample.data.imu.angular_velocity_z == value); break;
+            case KinisiTopic::MOTOR_CURRENT: assert(sample.data.motor_current.amps == value); break;
         }
         value = 9.0; fake_millis += 500; assert(c.poll());
         assert(c.getSubscriptionSample(t, 0, sample));
@@ -144,7 +145,32 @@ static void malformed_and_future_events() {
     }
 }
 
+static void four_current_streams() {
+    reset(); KinisiController c; assert(c.begin());
+    for (uint8_t index = 0; index < 4; ++index) {
+        assert(c.supportsTopic(KinisiTopic::MOTOR_CURRENT, index));
+        assert(c.subscribe(KinisiTopic::MOTOR_CURRENT, index, 20));
+    }
+    event_topic = 5;
+    for (uint8_t index = 0; index < 4; ++index) {
+        event_index = index; value = index + .125;
+        fake_millis += 20; assert(c.poll());
+    }
+    for (uint8_t index = 0; index < 4; ++index) {
+        KinisiTelemetrySample sample;
+        assert(c.getSubscriptionSample(KinisiTopic::MOTOR_CURRENT, index, sample));
+        assert(sample.data.motor_current.amps == index + .125);
+        assert(c.unsubscribe(KinisiTopic::MOTOR_CURRENT, index));
+        assert(!c.getSubscriptionSample(KinisiTopic::MOTOR_CURRENT, index, sample));
+    }
+    auto bytes = event();
+    kinisi_codec::writeDouble(bytes.data() + 16, -1);
+    KinisiTelemetrySample sample;
+    assert(!kinisiDecodeTelemetry(KinisiTopic::MOTOR_CURRENT, 3, bytes.data() + 6, 18, sample));
+}
+
 int main() {
     topics_and_buffers(); validation_and_lifecycle(); malformed_and_future_events();
+    four_current_streams();
     printf("PASS generic subscriptions, lifecycle and Wire capacity %d\n", KINISI_WIRE_BUFFER_SIZE);
 }

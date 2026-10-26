@@ -14,7 +14,7 @@ HEADER = '// Generated from tools/commands.json; edit the schema or generator in
 SESSION_COMMANDS = {'PING', 'SET_HEARTBEAT_CONFIG', 'SUBSCRIBE_ODOMETRY',
                     'UNSUBSCRIBE_ODOMETRY', 'ENCODER_ODOMETRY_EVENT',
                     'PLATFORM_ODOMETRY_EVENT', 'POLL_TELEMETRY', 'GET_TEMPERATURE', 'GET_IMU',
-                    'SUBSCRIBE', 'UNSUBSCRIBE', 'TELEMETRY_EVENT'}
+                    'GET_MOTOR_CURRENT', 'SUBSCRIBE', 'UNSUBSCRIBE', 'TELEMETRY_EVENT'}
 
 
 def public_commands(schema):
@@ -100,6 +100,8 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
                 source.append(f"            {target} = {decode(prop['type'], 'payload + ' + str(offset))};\n")
                 if prop['type'] == 'double':
                     source.append(f'            if (!isfinite({target})) return false;\n')
+                    if topic['name'] == 'MOTOR_CURRENT':
+                        source.append(f'            if ({target} < 0) return false;\n')
                 offset += size(prop['type'])
             source.append('            return true;\n')
         source.append('        default: return false;\n    }\n}\n')
@@ -144,6 +146,7 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
     keywords = '# Generated Arduino syntax map.\nKinisiController\tKEYWORD1\nbegin\tKEYWORD2\nready\tKEYWORD2\nboardInfo\tKEYWORD2\nlastError\tKEYWORD2\n'
     keywords += 'poll\tKEYWORD2\ngetSubscribedEncoderOdometry\tKEYWORD2\ngetSubscribedPlatformOdometry\tKEYWORD2\n'
     keywords += 'boardProfile\tKEYWORD2\nsupportsSensor\tKEYWORD2\nKinisiSensor\tKEYWORD1\nKinisiBoardProfile\tKEYWORD1\n'
+    keywords += 'supportsMotorCurrent\tKEYWORD2\n'
     if topics:
         keywords += 'KinisiTopic\tKEYWORD1\nKinisiTelemetrySample\tKEYWORD1\nsupportsTopic\tKEYWORD2\ngetSubscriptionSample\tKEYWORD2\n'
     keywords += ''.join(c['command'].lower() + '\tKEYWORD2\n' for c in public_commands(schema))

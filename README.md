@@ -1,37 +1,35 @@
 # ArduinoKinisi
-Arduino library for kinisi motion controller. This library allows to control kinisi motion controller from Arduino board via I2C interface.\
-Discription of the motor controller commands can be find here: [Kinisi Motion Controller Commands](https://github.com/szolotykh/kinisi-motor-controller-firmware/blob/main/commands.md)\
-Follow Arduino library installation instructions to install this library manually: [Installing Libraries](https://docs.arduino.cc/software/ide-v1/tutorials/installing-libraries)\
-*Note: This library is not compatible with only 3.3V Arduino boards.*
 
-API v2 is incompatible with API v1. See [protocol details](docs/protocol-v2.md).
+Arduino library for controlling Kinisi motion controllers over I2C. Use it to
+control motors and platforms, read encoders and sensors, and subscribe to live
+measurements. Bundled board profiles let applications check which features the
+connected controller supports.
 
-The library bundles public profiles for all four supported Kinisi boards.
-After `begin()`, `boardProfile()` exposes the automatically selected hardware
-profile and `supportsSensor()` checks sensor hardware, firmware protocol and
-Wire capacity. Profiles compile into C++ tables, stored in flash on AVR, with
-no runtime JSON parser or download.
+## Getting started
 
-Use `subscribe(KinisiTopic::TEMPERATURE, 0, 250)`, service `poll()` in `loop()`,
-and read `getSubscriptionSample()` for streamed values. The same API covers
-encoder odometry, platform odometry, temperature, and IMU. See
-[subscriptions](docs/connection-monitoring.md) for buffer requirements and samples.
+Follow the [Arduino library installation guide](https://docs.arduino.cc/software/ide-v1/tutorials/installing-libraries)
+to install this library manually. Connect the controller's I2C interface and
+common ground to your Arduino; the default controller address is `8`.
 
-## Examples
-Below is the example of using this library to control the status LED on the kinisi motion controller:
+This library targets the supported 5 V Arduino setup; 3.3 V-only Arduino boards
+are not supported. Firmware must use a compatible protocol major version.
+Some commands and subscriptions require larger Wire buffers than the default;
+check the [protocol and buffer requirements](docs/protocol-v2.md) for your application.
+
+This example toggles the controller's status LED once per second. Keep calling
+`poll()` in `loop()` to service the connection and any active subscriptions.
+If setup, polling, or a command fails, inspect `lastError()`; see
+[connection handling](docs/connection-monitoring.md) for recovery.
 
 ```cpp
 #include <kinisi.h>
 
-const int ledPin = LED_BUILTIN; // Status LED connected to pin 13
-bool ledState = false; // To keep track of the LED state
-KinisiController controller(8); // Initialize the Kinisi controller with the default address (8)
+KinisiController controller(8);
 
 void setup() {
   if (!controller.begin()) {
-    while (true) delay(1000); // Initialization failed.
+    while (true) delay(1000);
   }
-  pinMode(ledPin, OUTPUT); // Initialize the LED pin as an output
 }
 
 void loop() {
@@ -39,45 +37,21 @@ void loop() {
   static uint32_t toggled = 0;
   if (uint32_t(millis() - toggled) < 1000) return;
   toggled = millis();
-  if (!controller.toggle_status_led_state()) {
-    delay(1000);
-    return; // Inspect controller.lastError().
-  }
-  
-  ledState = !ledState; // Invert LED state
-  digitalWrite(ledPin, ledState ? HIGH : LOW); // Update LED state
+  if (!controller.toggle_status_led_state()) return;
 }
 ```
-Examples can be found in [examples](examples) folder.
-See the [motor/platform position example](examples/position-control/position-control.ino) for position control.
-See the [sensors example](examples/sensors/sensors.ino) for temperature and IMU reads.
 
-## Updating library
-Update commands and profiles from the project root:
-```bash
-python tools/update-commands.py --schema ../kinisi-motor-controller-firmware/commands.json
-python tools/update-board-profiles.py --profiles ../kinisi-motor-controller-firmware/include/board_profiles.json
-```
-The schema is explicit so regeneration cannot silently switch protocol versions.
-Both scripts accept `--branch <firmware-branch>` to download their source explicitly,
-or `--check` with either source option to detect stale files without writing.
-The snapshots are `tools/commands.json` and `tools/board_profiles.json`; the
-generated `kinisi_board_profiles.h/.cpp` ship with the library. Invalid inputs
-are rejected before replacing generated files. Custom runtime profiles are not supported.
+## Documentation and examples
 
-## Links
-- [Kinisi Motion Controller firmware](https://github.com/szolotykh/kinisi-motor-controller-firmware)
-- [Kinisi Motion Controller hardware](https://github.com/szolotykh/kinisi-motor-controller-board)
-- [JavaScipt package for kinisi motor controller](https://github.com/szolotykh/jskinisi)
-- [ArduinoKinisi library for kinisi motor controller](https://github.com/szolotykh/ArduinoKinisi)
-- [Python package for kinisi motor controller](https://github.com/szolotykh/pykinisi)
+- [Protocol, board profiles, errors, and Wire requirements](docs/protocol-v2.md)
+- [Connection monitoring and subscriptions](docs/connection-monitoring.md)
+- [Example sketches](examples)
+- [Updating generated commands and board profiles](docs/protocol-v2.md#updating-generated-files)
+- [Controller command reference](https://github.com/szolotykh/kinisi-motor-controller-firmware/blob/main/commands.md)
 
-## Wire buffer size
+## Related projects
 
-Temperature replies fit a default 32-byte Wire buffer. IMU replies require
-**at least 52 bytes**; a **64-byte TX/RX buffer** is suitable.
-
-`initialize_platform_position_pid_controller(...)` requires a Wire transmit buffer
-of at least **100 bytes**; **128 bytes is recommended**. Configure the board's
-actual Wire buffer and set `KINISI_WIRE_BUFFER_SIZE` to match. See
-[Wire buffer details](docs/protocol-v2.md#wire-transaction-limits).
+- [Kinisi firmware](https://github.com/szolotykh/kinisi-motor-controller-firmware)
+- [Kinisi hardware](https://github.com/szolotykh/kinisi-motor-controller-board)
+- [JavaScript SDK and web client](https://github.com/vsreality/jskinisi)
+- [Python SDK](https://github.com/szolotykh/pykinisi)

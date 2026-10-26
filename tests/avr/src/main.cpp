@@ -43,6 +43,11 @@ void setup() {
     if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(sample.acceleration_z);
     if (controller.supportsTopic(KinisiTopic::TEMPERATURE))
         controller.subscribe(KinisiTopic::TEMPERATURE, 0, 250);
+    if (controller.supportsMotorCurrent(0)) {
+        double amps = controller.get_motor_current(0);
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(amps);
+        controller.subscribe(KinisiTopic::MOTOR_CURRENT, 0, 100);
+    }
 }
 
 /** Compile the cooperative heartbeat service without enabling motors. */
@@ -51,4 +56,6 @@ void loop() {
     KinisiTelemetrySample sample;
     if (controller.getSubscriptionSample(KinisiTopic::TEMPERATURE, 0, sample))
         Serial.println(sample.data.temperature.celsius);
+    if (controller.getSubscriptionSample(KinisiTopic::MOTOR_CURRENT, 0, sample))
+        Serial.println(sample.data.motor_current.amps);
 }

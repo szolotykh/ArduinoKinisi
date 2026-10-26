@@ -11,12 +11,14 @@ boardProfile	KEYWORD2
 supportsSensor	KEYWORD2
 KinisiSensor	KEYWORD1
 KinisiBoardProfile	KEYWORD1
+supportsMotorCurrent	KEYWORD2
 KinisiTopic	KEYWORD1
 KinisiTelemetrySample	KEYWORD1
 supportsTopic	KEYWORD2
 getSubscriptionSample	KEYWORD2
 get_temperature	KEYWORD2
 get_imu	KEYWORD2
+get_motor_current	KEYWORD2
 initialize_motor	KEYWORD2
 set_motor_speed	KEYWORD2
 stop_motor	KEYWORD2

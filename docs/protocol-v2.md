@@ -5,7 +5,7 @@ identifies the SDK as Arduino 2.5.0, reads the controller identity, and waits fo
 READY. `boardInfo()` exposes hardware revision, protocol version and firmware Git
 build identity; `ready()` reports session readiness.
 
-The library includes protocol 2.6 commands while accepting firmware 2.1+ within
+The library includes protocol 2.7 commands while accepting firmware 2.1+ within
 protocol major 2. Major versions break existing wire interfaces and must match.
 Minor versions add compatible commands; patch versions provide compatible fixes
 and do not block connection. New commands are gated individually. Protocol
@@ -32,8 +32,11 @@ encoders, GPIO and status LED counts), `motor_features`, temperature IDs and
 IMU features. Use `resources.motors`, `temperature_count` and `imu_count` to
 delimit their arrays. Each IMU has an ID and accelerometer/gyroscope flags.
 Profiles omit pins, buses, addresses, control models and component values.
-Per-motor `current_sense` and `current_limit` indicate fitted hardware; current
-measurement and programmable-current commands remain unimplemented in firmware.
+Per-motor `current_sense` and `current_limit` indicate fitted hardware.
+`supportsMotorCurrent(index)` checks current-sensing hardware, protocol support,
+session readiness and Wire capacity. Current reads and subscriptions require
+protocol 2.7; see [motor current](connection-monitoring.md).
+Programmable-current commands remain unimplemented in firmware.
 
 The generated tables are read-only and stored in `PROGMEM` on AVR. Lookup copies
 one selected profile into the controller; no heap allocation or JSON parsing is
@@ -66,6 +69,7 @@ direct reads on those boards rely on firmware availability errors.
 | --- | --- | --- | --- |
 | `get_temperature(uint8_t sensor_index)` | 2.4+ | 12 bytes | Celsius `double` |
 | `get_imu(uint8_t sensor_index)` | 2.5+ | 52 bytes | `imu_sample` |
+| `get_motor_current(uint8_t motor_index)` | 2.7+ | 12 bytes | Amperes `double` |
 
 `imu_sample` has `acceleration_x`, `acceleration_y`, `acceleration_z` in m/s² and
 `angular_velocity_x`, `angular_velocity_y`, `angular_velocity_z` in rad/s.
@@ -173,3 +177,23 @@ platform targets use world-frame meters/meters/radians. Position integral limits
 are speed contributions (rad/s or m/s). Reset changes the origin and clears the
 target. Velocity overrides cancel position mode; stops and reinitialization can
 require position setup again. See [the motor/platform example](../examples/position-control/position-control.ino).
+
+## Updating generated files
+
+Commands and public board profiles come from the firmware repository. From the
+library root, regenerate both using the same local firmware checkout:
+
+```bash
+python tools/update-commands.py --schema ../kinisi-motor-controller-firmware/commands.json
+python tools/update-board-profiles.py --profiles ../kinisi-motor-controller-firmware/include/board_profiles.json
+```
+
+Both scripts also accept `--branch <firmware-branch>` to download their source
+from an explicit firmware branch, or `--check` with either source option to
+detect stale files without writing. Keep commands and profiles on the same
+firmware revision. Invalid inputs are rejected before replacing generated files.
+
+The snapshots are `tools/commands.json` and `tools/board_profiles.json`.
+Generated commands, types, and `kinisi_board_profiles.h/.cpp` ship with the
+library. Profiles are compiled into C++ tables; applications do not download
+or parse JSON at runtime. Run the [validation checks](#validation) after updates.

@@ -46,6 +46,7 @@ public:
     const KinisiBoardProfile* boardProfile() const { return profile_known_ ? &profile_ : nullptr; }
     /** Check fitted hardware, firmware protocol, and configured Wire capacity. */
     bool supportsSensor(KinisiSensor kind, uint8_t index = 0) const;
+    bool supportsMotorCurrent(uint8_t index = 0) const;
     /** Check topic hardware, protocol and full event size against Wire capacity. */
     bool supportsTopic(KinisiTopic topic, uint8_t index = 0) const;
     /** Copy the latest sample without I/O; select the union member using its topic. */

@@ -9,6 +9,7 @@ bool kinisiTopicInfo(KinisiTopic topic, uint8_t index, uint8_t& size, uint32_t& 
         case KinisiTopic::PLATFORM_ODOMETRY: size = 34; minimum_ms = 2; return index <= 0;
         case KinisiTopic::TEMPERATURE: size = 18; minimum_ms = 250; return true;
         case KinisiTopic::IMU: size = 58; minimum_ms = 10; return true;
+        case KinisiTopic::MOTOR_CURRENT: size = 18; minimum_ms = 20; return index <= 3;
         default: return false;
     }
 }
@@ -61,6 +62,14 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
             sample.data.imu.angular_velocity_z = kinisi_codec::readDouble(payload + 50);
             if (!isfinite(sample.data.imu.angular_velocity_z)) return false;
             return true;
+        case KinisiTopic::MOTOR_CURRENT:
+            sample.data.motor_current.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(payload + 0, 8));
+            sample.data.motor_current.clock_mode = static_cast<uint8_t>(kinisi_codec::readUnsigned(payload + 8, 1));
+            sample.data.motor_current.clock_quality = static_cast<uint8_t>(kinisi_codec::readUnsigned(payload + 9, 1));
+            sample.data.motor_current.amps = kinisi_codec::readDouble(payload + 10);
+            if (!isfinite(sample.data.motor_current.amps)) return false;
+            if (sample.data.motor_current.amps < 0) return false;
+            return true;
         default: return false;
     }
 }
@@ -89,6 +98,17 @@ imu_sample KinisiController::get_imu(uint8_t sensor_index) {
     result.angular_velocity_x = kinisi_codec::readDouble(response + 24);
     result.angular_velocity_y = kinisi_codec::readDouble(response + 32);
     result.angular_velocity_z = kinisi_codec::readDouble(response + 40);
+    return result;
+}
+
+/** Encode GET_MOTOR_CURRENT, match its reply, and decode the payload. */
+double KinisiController::get_motor_current(uint8_t motor_index) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(motor_index), 1);
+    double result = {};
+    uint8_t response[8] = {0};
+    if (!request(KINISI_GET_MOTOR_CURRENT, payload, 1, response, 8)) return result;
+    result = kinisi_codec::readDouble(response);
     return result;
 }
 
