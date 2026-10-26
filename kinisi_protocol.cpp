@@ -148,6 +148,14 @@ bool KinisiProtocol::supportsSensor(KinisiSensor kind, uint8_t index) const {
     }
 }
 
+bool KinisiProtocol::supportsMotorCurrent(uint8_t index) const {
+    if (!ready_ || !profile_known_ || identity_.protocol_major != 2 || identity_.protocol_minor < 7 ||
+            KINISI_WIRE_BUFFER_SIZE < 12) return false;
+    for (uint8_t i = 0; i < profile_.resources.motors; ++i)
+        if (profile_.motor_features[i].id == index) return profile_.motor_features[i].current_sense;
+    return false;
+}
+
 bool KinisiProtocol::supportsTopic(KinisiTopic topic, uint8_t index) const {
     uint8_t size; uint32_t minimum;
     if (!ready_ || !profile_known_ || identity_.protocol_major != 2 || identity_.protocol_minor < 6 ||
@@ -158,6 +166,7 @@ bool KinisiProtocol::supportsTopic(KinisiTopic topic, uint8_t index) const {
         case KinisiTopic::PLATFORM_ODOMETRY: return true;
         case KinisiTopic::TEMPERATURE: return profile_.hasSensor(KinisiSensor::TEMPERATURE, index);
         case KinisiTopic::IMU: return profile_.hasSensor(KinisiSensor::IMU, index);
+        case KinisiTopic::MOTOR_CURRENT: return supportsMotorCurrent(index);
         default: return false;
     }
 }
@@ -194,6 +203,7 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         case KINISI_INITIALIZE_PLATFORM_POSITION_PID_CONTROLLER: required_minor = 3; break;
         case KINISI_GET_TEMPERATURE: required_minor = 4; break;
         case KINISI_GET_IMU: required_minor = 5; break;
+        case KINISI_GET_MOTOR_CURRENT: required_minor = 7; break;
         case KINISI_SUBSCRIBE:
         case KINISI_UNSUBSCRIBE: required_minor = 6; break;
         default: break;
@@ -203,6 +213,8 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     int subscription_slot = -1;
     if (command == KINISI_SUBSCRIBE || command == KINISI_UNSUBSCRIBE) {
         const KinisiTopic topic = static_cast<KinisiTopic>(payload[0]);
+        if (topic == KinisiTopic::MOTOR_CURRENT && identity_.protocol_minor < 7)
+            return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
         uint8_t size; uint32_t minimum;
         if (!kinisiTopicInfo(topic, payload[1], size, minimum))
             return fail(KinisiFailure::INVALID_ARGUMENT, command, 0);
@@ -223,6 +235,11 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         }
     }
     const bool sensor_read = command == KINISI_GET_TEMPERATURE || command == KINISI_GET_IMU;
+    const bool current_read = command == KINISI_GET_MOTOR_CURRENT;
+    if (current_read && payload[0] > 3)
+        return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    if (current_read && profile_known_ && !supportsMotorCurrent(payload[0]))
+        return fail(KinisiFailure::SENSOR_NOT_AVAILABLE, command, 0, KinisiErrorCode::SENSOR_NOT_AVAILABLE);
     if (sensor_read && profile_known_ && !profile_.hasSensor(
             command == KINISI_GET_TEMPERATURE ? KinisiSensor::TEMPERATURE : KinisiSensor::IMU, payload[0]))
         return fail(KinisiFailure::SENSOR_NOT_AVAILABLE, command, 0, KinisiErrorCode::SENSOR_NOT_AVAILABLE);
@@ -232,7 +249,9 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     uint32_t started = millis();
     if (!send(command, id, payload, length, response_length) ||
         !receive(command, command, id, response, response_length, started)) return false;
-    if (sensor_read) {
+    if (current_read && kinisi_codec::readDouble(response) < 0)
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (sensor_read || current_read) {
         for (uint8_t offset = 0; offset < response_length; offset += 8)
             if (!isfinite(kinisi_codec::readDouble(response + offset)))
                 return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);

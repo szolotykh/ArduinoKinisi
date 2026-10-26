@@ -31,7 +31,7 @@ def check_incompatible_schemas(schema, output):
             raise AssertionError(f'Accepted incompatible schema: {version}')
         assert before == {name: (output / name).read_bytes() for name in names}
     print('PASS incompatible schemas preserve generated library files', flush=True)
-    for missing in [{'GET_TEMPERATURE'}, {'GET_IMU'}, {'GET_TEMPERATURE', 'GET_IMU'}]:
+    for missing in [{'GET_TEMPERATURE'}, {'GET_IMU'}, {'GET_MOTOR_CURRENT'}, {'GET_TEMPERATURE', 'GET_IMU'}]:
         incompatible = deepcopy(schema)
         incompatible['commands'] = [c for c in incompatible['commands'] if c['command'] not in missing]
         try:

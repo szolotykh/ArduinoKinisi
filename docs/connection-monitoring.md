@@ -27,6 +27,32 @@ Generic subscriptions require protocol 2.6 or newer within major 2. `supportsTop
 | `PLATFORM_ODOMETRY` | `platform_odometry` | 40 bytes | Twice calculation period |
 | `TEMPERATURE` | `temperature` | 24 bytes | 250 ms |
 | `IMU` | `imu` | 64 bytes | 10 ms |
+| `MOTOR_CURRENT` | `motor_current` (`amps`) | 24 bytes | 20 ms |
+
+Motor current uses motor indices 0–3 and requires protocol 2.7 and fitted sensing
+hardware. `supportsMotorCurrent(index)` checks pull support. The 12-byte pull
+response and 24-byte event both fit a default Uno Wire buffer.
+
+```cpp
+// After begin(), in setup():
+if (controller.supportsMotorCurrent(0)) {
+    double amps = controller.get_motor_current(0);
+    if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(amps);
+    controller.subscribe(KinisiTopic::MOTOR_CURRENT, 0, 100);
+}
+// In loop():
+controller.poll();
+KinisiTelemetrySample sample;
+if (controller.getSubscriptionSample(KinisiTopic::MOTOR_CURRENT, 0, sample))
+    Serial.println(sample.data.motor_current.amps);
+// When finished: controller.unsubscribe(KinisiTopic::MOTOR_CURRENT, 0);
+```
+
+Values are nonnegative filtered high-side current estimates. PWM affects the
+measurement; it is not signed winding or battery current. Reading does not enable
+the motor. Check `lastError()` after a pull; a zero return can represent failure.
+ADC saturation reports `SAMPLE_OUT_OF_RANGE`. Failed streamed reads pause delivery
+until recovery instead of repeating an old sample.
 
 The enum selects the valid union member. Platform index is 0; other topics use their resource index. Each subscription stores one latest sample. The default `KINISI_MAX_SUBSCRIPTIONS` is 8; set it consistently for the library and sketch to a value from 1 to 16 to trade RAM for capacity. The client returns `KinisiFailure::SUBSCRIPTION_LIMIT` before sending when local storage is full. Firmware can also return its own `SUBSCRIPTION_LIMIT` error. Replacing a subscription clears its old cached sample; a rejected replacement preserves it.
 

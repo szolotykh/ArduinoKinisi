@@ -179,7 +179,41 @@ static void invalid_samples() {
     }
 }
 
+static void current_readings() {
+    reset(4, 7); KinisiController c; assert(c.begin(1000, 0));
+    Wire.responder = [](const std::vector<uint8_t>& r) {
+        assert(r[1] == KINISI_GET_MOTOR_CURRENT && r.size() == 5 && r[4] < 4);
+        Wire.responses.push_back(frame(r[1], r[2] | uint16_t(r[3]) << 8, {0, 0, 0, 0, 0, 0, 0xf4, 0x3f}));
+    };
+    for (uint8_t i = 0; i < 4; ++i) {
+        assert(c.supportsMotorCurrent(i) && c.get_motor_current(i) == 1.25);
+        assert(c.lastError().failure == KinisiFailure::NONE);
+    }
+    size_t before = Wire.transactions;
+    assert(!c.supportsMotorCurrent(4));
+    c.get_motor_current(4);
+    assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == before);
+    for (uint8_t board : {1, 2, 3, 4, 99}) {
+        reset(board, board >= 4 ? 6 : 7); assert(c.begin(1000, 0));
+        before = Wire.transactions;
+        assert(!c.supportsMotorCurrent());
+        c.get_motor_current(0); assert(c.lastError().failure != KinisiFailure::NONE);
+        assert(!c.subscribe(KinisiTopic::MOTOR_CURRENT, 0, 100));
+        assert(Wire.transactions == before);
+    }
+    for (uint64_t bits : {UINT64_C(0xbff0000000000000), UINT64_C(0x7ff8000000000000), UINT64_C(0x7ff0000000000000)}) {
+        reset(4, 7); assert(c.begin(1000, 0));
+        Wire.responder = [bits](const std::vector<uint8_t>& r) {
+            std::vector<uint8_t> bytes;
+            for (unsigned i = 0; i < 8; ++i) bytes.push_back(uint8_t(bits >> (i * 8)));
+            Wire.responses.push_back(frame(r[1], r[2] | uint16_t(r[3]) << 8, bytes));
+        };
+        assert(c.get_motor_current(0) == 0 && c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    }
+}
+
 int main() {
     profiles(); sensor_reads_and_capacity(); gating_and_unknown_boards(); errors_and_lifecycle(); invalid_samples();
+    current_readings();
     printf("PASS board profiles, sensors and Wire capacity %u\n", unsigned(KINISI_WIRE_BUFFER_SIZE));
 }

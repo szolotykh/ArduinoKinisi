@@ -4,6 +4,7 @@
 #include <stdint.h>
 static const uint8_t KINISI_GET_TEMPERATURE = 0x50;
 static const uint8_t KINISI_GET_IMU = 0x51;
+static const uint8_t KINISI_GET_MOTOR_CURRENT = 0x52;
 static const uint8_t KINISI_INITIALIZE_MOTOR = 0x01;
 static const uint8_t KINISI_SET_MOTOR_SPEED = 0x02;
 static const uint8_t KINISI_STOP_MOTOR = 0x03;
@@ -83,7 +84,7 @@ enum class KinisiErrorCode : uint8_t {
     UNKNOWN_COMMAND = 3, // The received command ID is not accepted by the controller.
     INVALID_LENGTH = 4, // The complete message has an invalid header or payload length.
     MOTOR_OWNED = 5, // The motor belongs to a platform; use the corresponding platform command.
-    INTERNAL_ERROR = 6, // The controller could not execute or encode the operation.
+    INTERNAL_ERROR = 6, // The controller could not execute or encode the operation. During motor initialization, possible causes include missing motor power, a driver communication failure, or a faulty driver.
     CLOCK_NOT_READY = 7, // Initial clock setup is incomplete; wait for READY. Uptime mode also supports READY.
     TIME_SYNC_FAILED = 8, // Initial time sync exhausted its attempts without a valid sample.
     ODOMETRY_NOT_INITIALIZED = 9, // Odometry is not running; start odometry before requesting a measurement.
@@ -95,6 +96,7 @@ enum class KinisiErrorCode : uint8_t {
     INIT_REQUIRED = 15, // Send a valid INIT request before performing this connection-dependent operation.
     SENSOR_NOT_AVAILABLE = 16, // The selected sensor is not defined on this board.
     SUBSCRIPTION_LIMIT = 17, // This connection has no free subscription slots; unsubscribe an existing source first.
+    SAMPLE_OUT_OF_RANGE = 18, // The sensor reading is saturated; no valid measurement can be returned.
 };
 
 /** The state of the controller for the specified motor. */
@@ -199,12 +201,21 @@ struct imu_telemetry_sample {
     double angular_velocity_z; ///< Z angular velocity in rad/s.
 };
 
+/** Timestamped filtered motor-current estimate. */
+struct motor_current_sample {
+    uint64_t timestamp_us; ///< ADC read completion timestamp in the selected clock domain.
+    uint8_t clock_mode; ///< 0 uptime, 1 Unix wall time.
+    uint8_t clock_quality; ///< 1 valid, 2 stale.
+    double amps; ///< Nonnegative filtered high-side current estimate in amperes.
+};
+
 /** Stable wire identifiers for telemetry sources. */
 enum class KinisiTopic : uint8_t {
     ENCODER_ODOMETRY = 1,
     PLATFORM_ODOMETRY = 2,
     TEMPERATURE = 3,
     IMU = 4,
+    MOTOR_CURRENT = 5,
 };
 
 /** Only the union member selected by topic is valid. */
@@ -216,6 +227,7 @@ struct KinisiTelemetrySample {
         platform_odometry_sample platform_odometry;
         temperature_sample temperature;
         imu_telemetry_sample imu;
+        motor_current_sample motor_current;
     } data;
 };
 bool kinisiTopicInfo(KinisiTopic topic, uint8_t index, uint8_t& size, uint32_t& minimum_ms);
