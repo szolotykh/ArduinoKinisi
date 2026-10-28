@@ -5,7 +5,7 @@ identifies the SDK as Arduino 2.5.0, reads the controller identity, and waits fo
 READY. `boardInfo()` exposes hardware revision, protocol version and firmware Git
 build identity; `ready()` reports session readiness.
 
-The library includes protocol 2.7 commands while accepting firmware 2.1+ within
+The library includes protocol 2.11 commands while accepting firmware 2.1+ within
 protocol major 2. Major versions break existing wire interfaces and must match.
 Minor versions add compatible commands; patch versions provide compatible fixes
 and do not block connection. New commands are gated individually. Protocol
@@ -32,7 +32,7 @@ encoders, GPIO and status LED counts), `motor_features`, temperature IDs and
 IMU features. Use `resources.motors`, `temperature_count` and `imu_count` to
 delimit their arrays. Each IMU has an ID and accelerometer/gyroscope flags.
 Profiles omit pins, buses, addresses, control models and component values.
-Per-motor `current_sense` and `current_limit` indicate fitted hardware.
+Per-motor `current_sense`, `current_limit`, and `fault_reporting` indicate fitted hardware.
 `supportsMotorCurrent(index)` checks current-sensing hardware, protocol support,
 session readiness and Wire capacity. Current reads and subscriptions require
 protocol 2.7; see [motor current](connection-monitoring.md).
@@ -70,6 +70,7 @@ direct reads on those boards rely on firmware availability errors.
 | `get_temperature(uint8_t sensor_index)` | 2.4+ | 12 bytes | Celsius `double` |
 | `get_imu(uint8_t sensor_index)` | 2.5+ | 52 bytes | `imu_sample` |
 | `get_motor_current(uint8_t motor_index)` | 2.7+ | 12 bytes | Amperes `double` |
+| `get_motor_faults(uint8_t motor_index)` | 2.8+ | 14 bytes | `motor_fault_status` |
 
 `imu_sample` has `acceleration_x`, `acceleration_y`, `acceleration_z` in m/s² and
 `angular_velocity_x`, `angular_velocity_y`, `angular_velocity_z` in rad/s.
@@ -197,3 +198,34 @@ The snapshots are `tools/commands.json` and `tools/board_profiles.json`.
 Generated commands, types, and `kinisi_board_profiles.h/.cpp` ship with the
 library. Profiles are compiled into C++ tables; applications do not download
 or parse JSON at runtime. Run the [validation checks](#validation) after updates.
+
+## Motor current limits
+
+Current-limit configuration requires protocol 2.11 and fitted hardware. The public
+profile supplies numeric `supported_thresholds_ma` and `can_disable`; options are
+hardware metadata, while the support helper also checks firmware availability.
+Unknown/unsupported motors have no options. Values use integer milliamps and SDKs
+reject settings outside the known profile before sending. Firmware validates them
+independently. No board-specific enum is required.
+
+```cpp
+const KinisiCurrentLimitOptions* options = controller.getMotorCurrentLimitOptions(0);
+if (controller.supportsMotorCurrentLimit(0) && controller.initialize_motor(0, false)) {
+    motor_current_limit applied = controller.set_motor_current_limit(0, true, 5400);
+    if (controller.lastError().failure == KinisiFailure::NONE)
+        Serial.println(applied.threshold_ma);
+    // options->threshold_count delimits options->supported_thresholds_ma.
+}
+```
+
+Both GET and SET require an initialized, awake motor. SET stops the motor and its
+controller, verifies the applied setting, and leaves the motor stopped even on
+I/O failure. Platform-owned motors reject SET; release ownership first. GET does
+not change motor state. Settings are volatile: motor initialization reapplies
+board defaults, and driver power loss requires reinitialization. Disabling current
+regulation leaves overcurrent protection unchanged.
+
+An unknown board profile does not advertise support; explicit requests with a
+compatible protocol can still reach firmware. No custom profiles are loaded.
+See [firmware current-limit behavior](https://github.com/szolotykh/kinisi-motor-controller-firmware/blob/main/docs/motor-current-limit.md)
+for errors, persistence, register behavior, and wire sizes.

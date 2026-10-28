@@ -5,6 +5,7 @@
 static const uint8_t KINISI_GET_TEMPERATURE = 0x50;
 static const uint8_t KINISI_GET_IMU = 0x51;
 static const uint8_t KINISI_GET_MOTOR_CURRENT = 0x52;
+static const uint8_t KINISI_GET_MOTOR_FAULTS = 0x53;
 static const uint8_t KINISI_INITIALIZE_MOTOR = 0x01;
 static const uint8_t KINISI_SET_MOTOR_SPEED = 0x02;
 static const uint8_t KINISI_STOP_MOTOR = 0x03;
@@ -75,6 +76,11 @@ static const uint8_t KINISI_INITIALIZE_PLATFORM_POSITION_PID_CONTROLLER = 0x4E;
 static const uint8_t KINISI_SUBSCRIBE = 0x80;
 static const uint8_t KINISI_UNSUBSCRIBE = 0x81;
 static const uint8_t KINISI_TELEMETRY_EVENT = 0x82;
+static const uint8_t KINISI_SUBSCRIBE_WITH_MODE = 0x83;
+static const uint8_t KINISI_CLEAR_MOTOR_FAULTS = 0x54;
+static const uint8_t KINISI_GET_MOTOR_CURRENT_LIMIT = 0x55;
+static const uint8_t KINISI_SET_MOTOR_CURRENT_LIMIT = 0x56;
+static const uint8_t KINISI_SUBSCRIBE_CONFIGURED = 0x84;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -209,6 +215,57 @@ struct motor_current_sample {
     double amps; ///< Nonnegative filtered high-side current estimate in amperes.
 };
 
+/** Motor-driver diagnostic status. Ignore detailed flags when status_valid is false; a clear fault input alone does not establish driver health. */
+struct motor_fault_status {
+    bool sleep_requested; ///< The sleep control is asserted; reading never wakes the driver.
+    bool status_valid; ///< Driver diagnostic registers were read successfully. Detailed flags are unknown when false.
+    bool fault_active; ///< The fault input is asserted or a valid register reports a global fault.
+    bool overtemperature_warning; ///< Driver temperature warning is reported.
+    bool undervoltage; ///< Driver supply undervoltage is reported; this does not prove a disconnected supply.
+    bool charge_pump_undervoltage; ///< Driver charge-pump undervoltage is reported.
+    bool overcurrent; ///< An overcurrent fault is reported.
+    bool overtemperature_shutdown; ///< A thermal shutdown fault is reported.
+    bool open_load; ///< The configured open-load detector reports a fault; detection depends on operating conditions.
+    bool current_regulation; ///< At least one output reports current regulation; this is not an overcurrent fault.
+};
+
+/** Timestamped motor-driver diagnostic status. Timestamp marks completion of the read; faults can be latched rather than new events. */
+struct motor_fault_sample {
+    uint64_t timestamp_us; ///< ADC read completion timestamp in the selected clock domain.
+    uint8_t clock_mode; ///< 0 uptime, 1 Unix wall time.
+    uint8_t clock_quality; ///< 1 valid, 2 stale.
+    bool sleep_requested; ///< The sleep control is asserted; reading never wakes the driver.
+    bool status_valid; ///< Driver diagnostic registers were read successfully. Detailed flags are unknown when false.
+    bool fault_active; ///< The fault input is asserted or a valid register reports a global fault.
+    bool overtemperature_warning; ///< Driver temperature warning is reported.
+    bool undervoltage; ///< Driver supply undervoltage is reported; this does not prove a disconnected supply.
+    bool charge_pump_undervoltage; ///< Driver charge-pump undervoltage is reported.
+    bool overcurrent; ///< An overcurrent fault is reported.
+    bool overtemperature_shutdown; ///< A thermal shutdown fault is reported.
+    bool open_load; ///< The configured open-load detector reports a fault; detection depends on operating conditions.
+    bool current_regulation; ///< At least one output reports current regulation; this is not an overcurrent fault.
+};
+
+/** Applied nominal hardware current-regulation setting. */
+struct motor_current_limit {
+    bool enabled; ///< Current regulation is enabled on both outputs.
+    uint16_t threshold_ma; ///< Nominal threshold in milliamps.
+};
+enum class KinisiSubscriptionTrigger : uint8_t {
+    PERIODIC = 0,
+    ON_EVENT = 1,
+};
+enum class KinisiSubscriptionDelivery : uint8_t {
+    ALL = 0,
+    ON_CHANGE = 1,
+};
+
+/** Delivery behavior for generic subscriptions. */
+enum class KinisiSubscriptionMode : uint8_t {
+    PERIODIC = 0,
+    ON_CHANGE = 1,
+};
+
 /** Stable wire identifiers for telemetry sources. */
 enum class KinisiTopic : uint8_t {
     ENCODER_ODOMETRY = 1,
@@ -216,6 +273,7 @@ enum class KinisiTopic : uint8_t {
     TEMPERATURE = 3,
     IMU = 4,
     MOTOR_CURRENT = 5,
+    MOTOR_FAULTS = 6,
 };
 
 /** Only the union member selected by topic is valid. */
@@ -228,8 +286,10 @@ struct KinisiTelemetrySample {
         temperature_sample temperature;
         imu_telemetry_sample imu;
         motor_current_sample motor_current;
+        motor_fault_sample motor_faults;
     } data;
 };
 bool kinisiTopicInfo(KinisiTopic topic, uint8_t index, uint8_t& size, uint32_t& minimum_ms);
 bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payload, uint8_t size, KinisiTelemetrySample& sample);
 #endif
+bool kinisiTopicEventSupported(KinisiTopic topic);

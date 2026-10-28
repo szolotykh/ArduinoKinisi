@@ -212,8 +212,117 @@ static void current_readings() {
     }
 }
 
+
+static void fault_readings() {
+    reset(4, 8); KinisiController c; assert(c.begin(1000, 0));
+    Wire.responder = [](const std::vector<uint8_t>& r) {
+        assert(r[1] == KINISI_GET_MOTOR_FAULTS && r.size() == 5 && r[4] < 4);
+        Wire.responses.push_back(frame(r[1], r[2] | uint16_t(r[3]) << 8,
+            {0, 1, 0, 0, 0, 0, uint8_t(r[4] == 2), 0, 0, 0}));
+    };
+    for (uint8_t i = 0; i < 4; ++i) {
+        assert(c.supportsMotorFaults(i));
+        motor_fault_status status = c.get_motor_faults(i);
+        assert(status.status_valid && status.overcurrent == (i == 2));
+        assert(c.lastError().failure == KinisiFailure::NONE);
+    }
+    size_t before = Wire.transactions;
+    c.get_motor_faults(4);
+    assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == before);
+    for (uint8_t revision : {1, 2, 3, 4, 99}) {
+        reset(revision, revision >= 4 ? 7 : 8); assert(c.begin(1000, 0));
+        before = Wire.transactions;
+        assert(!c.supportsMotorFaults()); c.get_motor_faults(0);
+        assert(c.lastError().failure != KinisiFailure::NONE);
+        assert(!c.subscribe(KinisiTopic::MOTOR_FAULTS, 0, 100));
+        assert(Wire.transactions == before);
+    }
+    reset(4, 8); assert(c.begin(1000, 0));
+    Wire.responder = [](const std::vector<uint8_t>& r) {
+        Wire.responses.push_back(frame(r[1], r[2] | uint16_t(r[3]) << 8, std::vector<uint8_t>(10, 0)));
+    };
+    assert(!c.get_motor_faults(0).status_valid && c.lastError().failure == KinisiFailure::NONE);
+    Wire.responder = [](const std::vector<uint8_t>& r) {
+        Wire.responses.push_back(frame(r[1], r[2] | uint16_t(r[3]) << 8, {0, 2, 0, 0, 0, 0, 0, 0, 0, 0}));
+    };
+    c.get_motor_faults(0); assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+}
+
+
+static void clear_faults() {
+    reset(4, 10); KinisiController c; assert(c.begin(1000, 0));
+    Wire.responder = [](const std::vector<uint8_t>& r) {
+        assert(r[1] == KINISI_CLEAR_MOTOR_FAULTS && r.size() == 5 && r[4] < 4);
+        Wire.responses.push_back(frame(r[1], r[2] | uint16_t(r[3]) << 8, {0, 1, 1, 0, 0, 0, 1, 0, 0, 0}));
+    };
+    for (uint8_t i = 0; i < 4; ++i) {
+        motor_fault_status status = c.clear_motor_faults(i);
+        assert(c.lastError().failure == KinisiFailure::NONE && status.status_valid && status.overcurrent);
+    }
+    size_t before = Wire.transactions; c.clear_motor_faults(4);
+    assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == before);
+    for (uint8_t revision : {1, 2, 3, 4, 99}) {
+        reset(revision, revision >= 4 ? 9 : 10); assert(c.begin(1000, 0)); before = Wire.transactions;
+        c.clear_motor_faults(0); assert(c.lastError().failure != KinisiFailure::NONE && Wire.transactions == before);
+    }
+    reset(4, 10); assert(c.begin(1000, 0));
+    Wire.responder = [](const std::vector<uint8_t>& r) {
+        Wire.responses.push_back(frame(KINISI_ERROR, r[2] | uint16_t(r[3]) << 8,
+            {r[1], uint8_t(KinisiErrorCode::INTERNAL_ERROR)}));
+    };
+    c.clear_motor_faults(0); assert(c.lastError().code == KinisiErrorCode::INTERNAL_ERROR && c.ready());
+    Wire.responder = [](const std::vector<uint8_t>& r) {
+        Wire.responses.push_back(frame(r[1], r[2] | uint16_t(r[3]) << 8, {0, 2, 0, 0, 0, 0, 0, 0, 0, 0}));
+    };
+    c.clear_motor_faults(0); assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+}
+
+static void current_limits() {
+    reset(4, 11); KinisiController c; assert(c.begin(1000, 0));
+    for (uint8_t index = 0; index < 4; ++index) {
+        assert(c.supportsMotorCurrentLimit(index));
+        const KinisiCurrentLimitOptions* options = c.getMotorCurrentLimitOptions(index);
+        assert(options && options->threshold_count == 4 && options->can_disable);
+        const uint16_t expected[] = {4000, 5400, 6500, 7000};
+        for (uint8_t i = 0; i < 4; ++i) assert(options->supported_thresholds_ma[i] == expected[i]);
+        Wire.responder = [index](const std::vector<uint8_t>& r) {
+            assert(r[4] == index);
+            if (r[1] == KINISI_SET_MOTOR_CURRENT_LIMIT) {
+                assert(r.size() == 8 && r[5] == 0 && r[6] == 0x18 && r[7] == 0x15);
+            } else assert(r[1] == KINISI_GET_MOTOR_CURRENT_LIMIT && r.size() == 5);
+            Wire.responses.push_back(frame(r[1], r[2] | uint16_t(r[3]) << 8, {0, 0x18, 0x15}));
+        };
+        motor_current_limit setting = c.set_motor_current_limit(index, false, 5400);
+        assert(c.lastError().failure == KinisiFailure::NONE && !setting.enabled && setting.threshold_ma == 5400);
+        setting = c.get_motor_current_limit(index);
+        assert(c.lastError().failure == KinisiFailure::NONE && setting.threshold_ma == 5400);
+    }
+    size_t before = Wire.transactions;
+    c.set_motor_current_limit(0, true, 5000);
+    assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == before);
+    c.get_motor_current_limit(4);
+    assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == before);
+    Wire.responder = [](const std::vector<uint8_t>& r) {
+        Wire.responses.push_back(frame(r[1], r[2] | uint16_t(r[3]) << 8, {2, 0x18, 0x15}));
+    };
+    c.get_motor_current_limit(0);
+    assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    Wire.responder = [](const std::vector<uint8_t>&) {};
+    assert(!c.begin(10, 0));
+    assert(!c.supportsMotorCurrentLimit() && c.getMotorCurrentLimitOptions() == nullptr);
+    for (uint8_t board = 1; board <= 4; ++board) {
+        reset(board, board == 4 ? 10 : 11); assert(c.begin(1000, 0));
+        assert(!c.supportsMotorCurrentLimit());
+        before = Wire.transactions;
+        c.set_motor_current_limit(0, true, 5400);
+        assert(Wire.transactions == before && c.lastError().failure != KinisiFailure::NONE);
+    }
+}
+
 int main() {
+    current_limits();
+    clear_faults();
     profiles(); sensor_reads_and_capacity(); gating_and_unknown_boards(); errors_and_lifecycle(); invalid_samples();
-    current_readings();
+    current_readings(); fault_readings();
     printf("PASS board profiles, sensors and Wire capacity %u\n", unsigned(KINISI_WIRE_BUFFER_SIZE));
 }

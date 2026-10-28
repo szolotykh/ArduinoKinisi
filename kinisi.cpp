@@ -10,6 +10,7 @@ bool kinisiTopicInfo(KinisiTopic topic, uint8_t index, uint8_t& size, uint32_t& 
         case KinisiTopic::TEMPERATURE: size = 18; minimum_ms = 250; return true;
         case KinisiTopic::IMU: size = 58; minimum_ms = 10; return true;
         case KinisiTopic::MOTOR_CURRENT: size = 18; minimum_ms = 20; return index <= 3;
+        case KinisiTopic::MOTOR_FAULTS: size = 20; minimum_ms = 100; return index <= 3;
         default: return false;
     }
 }
@@ -70,9 +71,36 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
             if (!isfinite(sample.data.motor_current.amps)) return false;
             if (sample.data.motor_current.amps < 0) return false;
             return true;
+        case KinisiTopic::MOTOR_FAULTS:
+            sample.data.motor_faults.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(payload + 0, 8));
+            sample.data.motor_faults.clock_mode = static_cast<uint8_t>(kinisi_codec::readUnsigned(payload + 8, 1));
+            sample.data.motor_faults.clock_quality = static_cast<uint8_t>(kinisi_codec::readUnsigned(payload + 9, 1));
+            sample.data.motor_faults.sleep_requested = static_cast<bool>(kinisi_codec::readUnsigned(payload + 10, 1));
+            if (payload[10] > 1) return false;
+            sample.data.motor_faults.status_valid = static_cast<bool>(kinisi_codec::readUnsigned(payload + 11, 1));
+            if (payload[11] > 1) return false;
+            sample.data.motor_faults.fault_active = static_cast<bool>(kinisi_codec::readUnsigned(payload + 12, 1));
+            if (payload[12] > 1) return false;
+            sample.data.motor_faults.overtemperature_warning = static_cast<bool>(kinisi_codec::readUnsigned(payload + 13, 1));
+            if (payload[13] > 1) return false;
+            sample.data.motor_faults.undervoltage = static_cast<bool>(kinisi_codec::readUnsigned(payload + 14, 1));
+            if (payload[14] > 1) return false;
+            sample.data.motor_faults.charge_pump_undervoltage = static_cast<bool>(kinisi_codec::readUnsigned(payload + 15, 1));
+            if (payload[15] > 1) return false;
+            sample.data.motor_faults.overcurrent = static_cast<bool>(kinisi_codec::readUnsigned(payload + 16, 1));
+            if (payload[16] > 1) return false;
+            sample.data.motor_faults.overtemperature_shutdown = static_cast<bool>(kinisi_codec::readUnsigned(payload + 17, 1));
+            if (payload[17] > 1) return false;
+            sample.data.motor_faults.open_load = static_cast<bool>(kinisi_codec::readUnsigned(payload + 18, 1));
+            if (payload[18] > 1) return false;
+            sample.data.motor_faults.current_regulation = static_cast<bool>(kinisi_codec::readUnsigned(payload + 19, 1));
+            if (payload[19] > 1) return false;
+            return true;
         default: return false;
     }
 }
+
+bool kinisiTopicEventSupported(KinisiTopic topic) { return uint8_t(topic) == 6; }
 
 /** Encode GET_TEMPERATURE, match its reply, and decode the payload. */
 double KinisiController::get_temperature(uint8_t sensor_index) {
@@ -109,6 +137,26 @@ double KinisiController::get_motor_current(uint8_t motor_index) {
     uint8_t response[8] = {0};
     if (!request(KINISI_GET_MOTOR_CURRENT, payload, 1, response, 8)) return result;
     result = kinisi_codec::readDouble(response);
+    return result;
+}
+
+/** Encode GET_MOTOR_FAULTS, match its reply, and decode the payload. */
+motor_fault_status KinisiController::get_motor_faults(uint8_t motor_index) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(motor_index), 1);
+    motor_fault_status result = {};
+    uint8_t response[10] = {0};
+    if (!request(KINISI_GET_MOTOR_FAULTS, payload, 1, response, 10)) return result;
+    result.sleep_requested = static_cast<bool>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.status_valid = static_cast<bool>(kinisi_codec::readUnsigned(response + 1, 1));
+    result.fault_active = static_cast<bool>(kinisi_codec::readUnsigned(response + 2, 1));
+    result.overtemperature_warning = static_cast<bool>(kinisi_codec::readUnsigned(response + 3, 1));
+    result.undervoltage = static_cast<bool>(kinisi_codec::readUnsigned(response + 4, 1));
+    result.charge_pump_undervoltage = static_cast<bool>(kinisi_codec::readUnsigned(response + 5, 1));
+    result.overcurrent = static_cast<bool>(kinisi_codec::readUnsigned(response + 6, 1));
+    result.overtemperature_shutdown = static_cast<bool>(kinisi_codec::readUnsigned(response + 7, 1));
+    result.open_load = static_cast<bool>(kinisi_codec::readUnsigned(response + 8, 1));
+    result.current_regulation = static_cast<bool>(kinisi_codec::readUnsigned(response + 9, 1));
     return result;
 }
 
@@ -633,7 +681,8 @@ bool KinisiController::initialize_platform_position_pid_controller(double linear
 }
 
 /** Encode SUBSCRIBE, match its reply, and decode the payload. */
-bool KinisiController::subscribe(KinisiTopic topic_id, uint8_t index, uint32_t interval_ms) {
+bool KinisiController::subscribe(KinisiTopic topic_id, uint8_t index, uint32_t interval_ms, KinisiSubscriptionMode mode) {
+    if (mode != KinisiSubscriptionMode::PERIODIC) return subscribe_with_mode(topic_id, index, interval_ms, mode);
     uint8_t payload[6] = {0};
     kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(topic_id), 1);
     kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(index), 1);
@@ -647,4 +696,72 @@ bool KinisiController::unsubscribe(KinisiTopic topic_id, uint8_t index) {
     kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(topic_id), 1);
     kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(index), 1);
     return request(KINISI_UNSUBSCRIBE, payload, 2, nullptr, 0);
+}
+
+/** Encode SUBSCRIBE_WITH_MODE, match its reply, and decode the payload. */
+bool KinisiController::subscribe_with_mode(KinisiTopic topic_id, uint8_t index, uint32_t interval_ms, KinisiSubscriptionMode mode) {
+    uint8_t payload[7] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(topic_id), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(index), 1);
+    kinisi_codec::writeUnsigned(payload + 2, static_cast<uint64_t>(interval_ms), 4);
+    kinisi_codec::writeUnsigned(payload + 6, static_cast<uint64_t>(mode), 1);
+    return request(KINISI_SUBSCRIBE_WITH_MODE, payload, 7, nullptr, 0);
+}
+
+/** Encode CLEAR_MOTOR_FAULTS, match its reply, and decode the payload. */
+motor_fault_status KinisiController::clear_motor_faults(uint8_t motor_index) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(motor_index), 1);
+    motor_fault_status result = {};
+    uint8_t response[10] = {0};
+    if (!request(KINISI_CLEAR_MOTOR_FAULTS, payload, 1, response, 10)) return result;
+    result.sleep_requested = static_cast<bool>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.status_valid = static_cast<bool>(kinisi_codec::readUnsigned(response + 1, 1));
+    result.fault_active = static_cast<bool>(kinisi_codec::readUnsigned(response + 2, 1));
+    result.overtemperature_warning = static_cast<bool>(kinisi_codec::readUnsigned(response + 3, 1));
+    result.undervoltage = static_cast<bool>(kinisi_codec::readUnsigned(response + 4, 1));
+    result.charge_pump_undervoltage = static_cast<bool>(kinisi_codec::readUnsigned(response + 5, 1));
+    result.overcurrent = static_cast<bool>(kinisi_codec::readUnsigned(response + 6, 1));
+    result.overtemperature_shutdown = static_cast<bool>(kinisi_codec::readUnsigned(response + 7, 1));
+    result.open_load = static_cast<bool>(kinisi_codec::readUnsigned(response + 8, 1));
+    result.current_regulation = static_cast<bool>(kinisi_codec::readUnsigned(response + 9, 1));
+    return result;
+}
+
+/** Encode GET_MOTOR_CURRENT_LIMIT, match its reply, and decode the payload. */
+motor_current_limit KinisiController::get_motor_current_limit(uint8_t motor_index) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(motor_index), 1);
+    motor_current_limit result = {};
+    uint8_t response[3] = {0};
+    if (!request(KINISI_GET_MOTOR_CURRENT_LIMIT, payload, 1, response, 3)) return result;
+    result.enabled = static_cast<bool>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.threshold_ma = static_cast<uint16_t>(kinisi_codec::readUnsigned(response + 1, 2));
+    return result;
+}
+
+/** Encode SET_MOTOR_CURRENT_LIMIT, match its reply, and decode the payload. */
+motor_current_limit KinisiController::set_motor_current_limit(uint8_t motor_index, bool enabled, uint16_t threshold_ma) {
+    uint8_t payload[4] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(motor_index), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(enabled), 1);
+    kinisi_codec::writeUnsigned(payload + 2, static_cast<uint64_t>(threshold_ma), 2);
+    motor_current_limit result = {};
+    uint8_t response[3] = {0};
+    if (!request(KINISI_SET_MOTOR_CURRENT_LIMIT, payload, 4, response, 3)) return result;
+    result.enabled = static_cast<bool>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.threshold_ma = static_cast<uint16_t>(kinisi_codec::readUnsigned(response + 1, 2));
+    return result;
+}
+
+/** Encode SUBSCRIBE_CONFIGURED, match its reply, and decode the payload. */
+bool KinisiController::subscribe_configured(KinisiTopic topic_id, uint8_t index, uint32_t poll_interval_ms, KinisiSubscriptionTrigger trigger, KinisiSubscriptionDelivery delivery, uint32_t max_silence_ms) {
+    uint8_t payload[12] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(topic_id), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(index), 1);
+    kinisi_codec::writeUnsigned(payload + 2, static_cast<uint64_t>(poll_interval_ms), 4);
+    kinisi_codec::writeUnsigned(payload + 6, static_cast<uint64_t>(trigger), 1);
+    kinisi_codec::writeUnsigned(payload + 7, static_cast<uint64_t>(delivery), 1);
+    kinisi_codec::writeUnsigned(payload + 8, static_cast<uint64_t>(max_silence_ms), 4);
+    return request(KINISI_SUBSCRIBE_CONFIGURED, payload, 12, nullptr, 0);
 }

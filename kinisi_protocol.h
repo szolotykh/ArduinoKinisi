@@ -47,6 +47,10 @@ public:
     /** Check fitted hardware, firmware protocol, and configured Wire capacity. */
     bool supportsSensor(KinisiSensor kind, uint8_t index = 0) const;
     bool supportsMotorCurrent(uint8_t index = 0) const;
+    /** Discrete hardware options, or nullptr for unknown/unsupported motors. */
+    const KinisiCurrentLimitOptions* getMotorCurrentLimitOptions(uint8_t index = 0) const;
+    bool supportsMotorCurrentLimit(uint8_t index = 0) const;
+    bool supportsMotorFaults(uint8_t index = 0) const;
     /** Check topic hardware, protocol and full event size against Wire capacity. */
     bool supportsTopic(KinisiTopic topic, uint8_t index = 0) const;
     /** Copy the latest sample without I/O; select the union member using its topic. */
