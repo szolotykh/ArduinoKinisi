@@ -14,7 +14,7 @@ HEADER = '// Generated from tools/commands.json; edit the schema or generator in
 SESSION_COMMANDS = {'PING', 'SET_HEARTBEAT_CONFIG', 'SUBSCRIBE_ODOMETRY',
                     'UNSUBSCRIBE_ODOMETRY', 'ENCODER_ODOMETRY_EVENT',
                     'PLATFORM_ODOMETRY_EVENT', 'POLL_TELEMETRY', 'GET_TEMPERATURE', 'GET_IMU',
-                    'GET_MOTOR_CURRENT', 'SUBSCRIBE', 'UNSUBSCRIBE', 'TELEMETRY_EVENT'}
+                    'GET_MOTOR_CURRENT', 'GET_MOTOR_FAULTS', 'CLEAR_MOTOR_FAULTS', 'GET_MOTOR_CURRENT_LIMIT', 'SET_MOTOR_CURRENT_LIMIT', 'SUBSCRIBE', 'SUBSCRIBE_WITH_MODE', 'UNSUBSCRIBE', 'TELEMETRY_EVENT', 'SUBSCRIBE_CONFIGURED'}
 
 
 def public_commands(schema):
@@ -60,6 +60,15 @@ def generate(schema, output, check=False):
         for p in o['properties']:
             types.append(f"    {p['type']} {p['name']}; ///< {p['description']}\n")
         types.append('};\n')
+    for key, name in [('subscription_triggers', 'KinisiSubscriptionTrigger'), ('subscription_deliveries', 'KinisiSubscriptionDelivery')]:
+        types.append(f'enum class {name} : uint8_t {{\n')
+        for item in schema.get(key, []):
+            types.append(f"    {item['name']} = {item['id']},\n")
+        types.append('};\n')
+    types.append('\n/** Delivery behavior for generic subscriptions. */\nenum class KinisiSubscriptionMode : uint8_t {\n')
+    for mode in schema['subscription_modes']:
+        types.append(f"    {mode['name']} = {mode['id']},\n")
+    types.append('};\n')
     topics = schema.get('topics', [])
     if topics:
         types.append('\n/** Stable wire identifiers for telemetry sources. */\nenum class KinisiTopic : uint8_t {\n')
@@ -98,6 +107,8 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
             for prop in objects[topic['payload_type']]['properties']:
                 target = f"sample.data.{topic['name'].lower()}.{prop['name']}"
                 source.append(f"            {target} = {decode(prop['type'], 'payload + ' + str(offset))};\n")
+                if prop['type'] == 'bool':
+                    source.append(f'            if (payload[{offset}] > 1) return false;\n')
                 if prop['type'] == 'double':
                     source.append(f'            if (!isfinite({target})) return false;\n')
                     if topic['name'] == 'MOTOR_CURRENT':
@@ -105,11 +116,21 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
                 offset += size(prop['type'])
             source.append('            return true;\n')
         source.append('        default: return false;\n    }\n}\n')
+    if schema.get('subscription_triggers'):
+        header.append('    bool subscribe(KinisiTopic topic, uint8_t index, uint32_t poll_interval_ms, KinisiSubscriptionTrigger trigger, KinisiSubscriptionDelivery delivery, uint32_t max_silence_ms = 0) { return subscribe_configured(topic, index, poll_interval_ms, trigger, delivery, max_silence_ms); }\n')
+        types.append('bool kinisiTopicEventSupported(KinisiTopic topic);\n')
+        event_ids = [t['id'] for t in topics if t.get('event_supported')]
+        # Definition must be outside the controller class, alongside generated topic helpers.
+        source.append('\nbool kinisiTopicEventSupported(KinisiTopic topic) { return ' + (' || '.join('uint8_t(topic) == ' + str(i) for i in event_ids) or 'false') + '; }\n')
     for c in public_commands(schema):
         props = c.get('properties', [])
-        args = ', '.join(('KinisiTopic' if p.get('enum') == 'telemetry_topic' else p['type']) + ' ' + p['name'] for p in props)
+        args = ', '.join(({'telemetry_topic': 'KinisiTopic', 'subscription_mode': 'KinisiSubscriptionMode', 'subscription_trigger': 'KinisiSubscriptionTrigger', 'subscription_delivery': 'KinisiSubscriptionDelivery'}.get(p.get('enum'), p['type'])) + ' ' + p['name'] for p in props)
+        if c['command'] == 'SUBSCRIBE':
+            args += ', KinisiSubscriptionMode mode'
         velocity = c['command'] in ('INITIALIZE_MOTOR_CONTROLLER', 'START_PLATFORM_CONTROLLER')
         declaration_args = args + ' = 100.0' if velocity else args
+        if c['command'] == 'SUBSCRIBE':
+            declaration_args += ' = KinisiSubscriptionMode::PERIODIC'
         rt = response_type(c)
         method = c['command'].lower()
         doc = c['description'] + ' Errors: ' + ', '.join(c.get('errors', [])) + '.'
@@ -117,6 +138,8 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
             doc += '\n     * @deprecated ' + retirement_notice(c)
         header.append(f'\n    /** {doc} Check lastError() after getters; setters return success. */\n    {rt or "bool"} {method}({declaration_args});\n')
         source.append(f'\n/** Encode {c["command"]}, match its reply, and decode the payload. */\n{rt or "bool"} KinisiController::{method}({args}) {{\n')
+        if c['command'] == 'SUBSCRIBE':
+            source.append('    if (mode != KinisiSubscriptionMode::PERIODIC) return subscribe_with_mode(topic_id, index, interval_ms, mode);\n')
         if velocity:
             source.append(f'    if (!validateVelocityTuning(KINISI_{c["command"]}, kp, ki, kd, integral_limit)) return false;\n')
         n = sum(size(p['type']) for p in props)
@@ -146,9 +169,11 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
     keywords = '# Generated Arduino syntax map.\nKinisiController\tKEYWORD1\nbegin\tKEYWORD2\nready\tKEYWORD2\nboardInfo\tKEYWORD2\nlastError\tKEYWORD2\n'
     keywords += 'poll\tKEYWORD2\ngetSubscribedEncoderOdometry\tKEYWORD2\ngetSubscribedPlatformOdometry\tKEYWORD2\n'
     keywords += 'boardProfile\tKEYWORD2\nsupportsSensor\tKEYWORD2\nKinisiSensor\tKEYWORD1\nKinisiBoardProfile\tKEYWORD1\n'
-    keywords += 'supportsMotorCurrent\tKEYWORD2\n'
+    keywords += 'supportsMotorCurrent\tKEYWORD2\nsupportsMotorFaults\tKEYWORD2\n'
     if topics:
-        keywords += 'KinisiTopic\tKEYWORD1\nKinisiTelemetrySample\tKEYWORD1\nsupportsTopic\tKEYWORD2\ngetSubscriptionSample\tKEYWORD2\n'
+        keywords += 'KinisiSubscriptionMode\tKEYWORD1\nKinisiTopic\tKEYWORD1\nKinisiTelemetrySample\tKEYWORD1\nsupportsTopic\tKEYWORD2\ngetSubscriptionSample\tKEYWORD2\n'
+    if schema.get('subscription_triggers'):
+        keywords += 'KinisiSubscriptionTrigger\tKEYWORD1\nKinisiSubscriptionDelivery\tKEYWORD1\n'
     keywords += ''.join(c['command'].lower() + '\tKEYWORD2\n' for c in public_commands(schema))
     if not check:
         output.mkdir(parents=True, exist_ok=True)

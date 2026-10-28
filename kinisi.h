@@ -8,6 +8,7 @@ class KinisiController : public KinisiProtocol {
 public:
     /** Select a seven-bit I2C address (default 8). Does not touch the bus. */
     explicit KinisiController(uint8_t address = 8) : KinisiProtocol(address) {}
+    bool subscribe(KinisiTopic topic, uint8_t index, uint32_t poll_interval_ms, KinisiSubscriptionTrigger trigger, KinisiSubscriptionDelivery delivery, uint32_t max_silence_ms = 0) { return subscribe_configured(topic, index, poll_interval_ms, trigger, delivery, max_silence_ms); }
 
     /** Read the latest board temperature in degrees Celsius. Sensor 0 is the TMP102 on v0.4. Sampling runs at 4 Hz; faster reads may repeat a sample. Returns SAMPLE_NOT_AVAILABLE during the first 300 ms after sensor initialization or recovery, SENSOR_NOT_AVAILABLE when the board has no such sensor, and INTERNAL_ERROR on I2C or configuration failure. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, SENSOR_NOT_AVAILABLE, SAMPLE_NOT_AVAILABLE, INTERNAL_ERROR. Check lastError() after getters; setters return success. */
     double get_temperature(uint8_t sensor_index);
@@ -17,6 +18,9 @@ public:
 
     /** Read the filtered motor-current estimate in amperes. The unsigned reading measures driver high-side current; PWM decay intervals and the analog filter affect it. Reading does not enable or initialize the motor. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, SENSOR_NOT_AVAILABLE, SAMPLE_OUT_OF_RANGE, INTERNAL_ERROR. Check lastError() after getters; setters return success. */
     double get_motor_current(uint8_t motor_index);
+
+    /** Read motor-driver fault status without waking, initializing, enabling or clearing the driver. Detailed flags are meaningful only when status_valid is true. An unavailable SPI response cannot distinguish missing motor power from a communication or driver failure. Flags may retain latched faults until explicit motor reinitialization. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, SENSOR_NOT_AVAILABLE. Check lastError() after getters; setters return success. */
+    motor_fault_status get_motor_faults(uint8_t motor_index);
 
     /** This command initializes a motor and prepares it for use. Rejected with MOTOR_OWNED if the motor is currently owned by an active platform (one of its wheels), so platform wheels are not reconfigured out from under the platform. Stops the motor velocity and position controllers before applying the command. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, MOTOR_OWNED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
     bool initialize_motor(uint8_t motor_index, bool is_reversed);
@@ -189,9 +193,24 @@ public:
     bool initialize_platform_position_pid_controller(double linear_kp, double angular_kp, double max_linear_speed, double max_angular_speed, double position_tolerance, double heading_tolerance, double linear_ki, double linear_kd, double linear_integral_limit, double angular_ki, double angular_kd, double angular_integral_limit);
 
     /** Create or replace this connection's subscription for a topic and resource. Requires READY and enabled heartbeat. Odometry must be running. The interval must meet the topic minimum and, for odometry, be at least twice the calculation period. Failed reads pause delivery until recovery. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, CLOCK_NOT_READY, ODOMETRY_NOT_INITIALIZED, SENSOR_NOT_AVAILABLE, INTERNAL_ERROR, SUBSCRIPTION_LIMIT, SAMPLE_OUT_OF_RANGE. Check lastError() after getters; setters return success. */
-    bool subscribe(KinisiTopic topic_id, uint8_t index, uint32_t interval_ms);
+    bool subscribe(KinisiTopic topic_id, uint8_t index, uint32_t interval_ms, KinisiSubscriptionMode mode = KinisiSubscriptionMode::PERIODIC);
 
     /** Remove this connection's subscription for a topic and resource. Requires READY. Succeeds if already absent and leaves calculation running. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, CLOCK_NOT_READY. Check lastError() after getters; setters return success. */
     bool unsubscribe(KinisiTopic topic_id, uint8_t index);
+
+    /** Create or replace this connection's subscription with a delivery mode. Requires READY and enabled heartbeat. The interval sets the sampling cadence and must meet the topic minimum; odometry also requires twice the calculation period. ON_CHANGE sends an initial snapshot and changed values, excluding timestamp and clock metadata. Failed reads pause delivery; recovery sends a fresh snapshot. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, CLOCK_NOT_READY, ODOMETRY_NOT_INITIALIZED, SENSOR_NOT_AVAILABLE, INTERNAL_ERROR, SUBSCRIPTION_LIMIT, SAMPLE_OUT_OF_RANGE. Check lastError() after getters; setters return success. */
+    bool subscribe_with_mode(KinisiTopic topic_id, uint8_t index, uint32_t interval_ms, KinisiSubscriptionMode mode);
+
+    /** Stop the initialized motor and its controller, clear latched driver faults, and return fresh diagnostics. Requires a ready connection. The motor remains stopped. Active conditions can remain reported. Platform-owned motors are rejected. Driver configuration is preserved; sleeping drivers are not woken. A failed clear or unreadable verification returns an error. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, SENSOR_NOT_AVAILABLE, MOTOR_OWNED, MOTOR_NOT_INITIALIZED, INTERNAL_ERROR, CLOCK_NOT_READY. Check lastError() after getters; setters return success. */
+    motor_fault_status clear_motor_faults(uint8_t motor_index);
+
+    /** Read the applied hardware current-regulation setting in milliamps. Requires a ready connection and an initialized, awake motor driver. Does not change motor state. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, CLOCK_NOT_READY, MOTOR_NOT_INITIALIZED, SENSOR_NOT_AVAILABLE, INTERNAL_ERROR. Check lastError() after getters; setters return success. */
+    motor_current_limit get_motor_current_limit(uint8_t motor_index);
+
+    /** Stop the motor and its controller, apply and verify hardware current regulation, and return the applied setting. Requires a ready connection and an initialized, awake driver. Only board-supported thresholds are accepted. Platform-owned motors are rejected. The motor stays stopped. Settings are volatile; motor reinitialization applies board defaults. Driver power loss requires reinitialization. Overcurrent protection is unchanged. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, CLOCK_NOT_READY, MOTOR_NOT_INITIALIZED, SENSOR_NOT_AVAILABLE, INTERNAL_ERROR, MOTOR_OWNED. Check lastError() after getters; setters return success. */
+    motor_current_limit set_motor_current_limit(uint8_t motor_index, bool enabled, uint16_t threshold_ma);
+
+    /** Create or replace a subscription with independent trigger and delivery settings. Send an initial snapshot. PERIODIC uses poll_interval_ms; ON_EVENT requires zero polling interval and an event-capable source. ON_CHANGE suppresses unchanged values, excluding timestamp and clock metadata; max_silence_ms requests fresh refreshes, or zero disables refreshes. Delivery is best effort and requires READY and heartbeat. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, CLOCK_NOT_READY, ODOMETRY_NOT_INITIALIZED, SENSOR_NOT_AVAILABLE, INTERNAL_ERROR, SUBSCRIPTION_LIMIT, SAMPLE_OUT_OF_RANGE. Check lastError() after getters; setters return success. */
+    bool subscribe_configured(KinisiTopic topic_id, uint8_t index, uint32_t poll_interval_ms, KinisiSubscriptionTrigger trigger, KinisiSubscriptionDelivery delivery, uint32_t max_silence_ms);
 };
 #endif

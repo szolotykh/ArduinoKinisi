@@ -31,9 +31,12 @@ def check_incompatible_schemas(schema, output):
             raise AssertionError(f'Accepted incompatible schema: {version}')
         assert before == {name: (output / name).read_bytes() for name in names}
     print('PASS incompatible schemas preserve generated library files', flush=True)
-    for missing in [{'GET_TEMPERATURE'}, {'GET_IMU'}, {'GET_MOTOR_CURRENT'}, {'GET_TEMPERATURE', 'GET_IMU'}]:
+    for missing in [{'GET_TEMPERATURE'}, {'GET_IMU'}, {'GET_MOTOR_CURRENT'}, {'GET_MOTOR_FAULTS'}, {'SUBSCRIBE_CONFIGURED'}, {'GET_MOTOR_CURRENT_LIMIT'}, {'SET_MOTOR_CURRENT_LIMIT'}, {'GET_TEMPERATURE', 'GET_IMU'}]:
         incompatible = deepcopy(schema)
         incompatible['commands'] = [c for c in incompatible['commands'] if c['command'] not in missing]
+        if 'SUBSCRIBE_CONFIGURED' in missing:
+            incompatible.pop('subscription_triggers', None)
+            incompatible.pop('subscription_deliveries', None)
         try:
             generate(incompatible, output)
         except ValueError as error:
@@ -62,6 +65,10 @@ def check_metadata(schema, output):
     names = ['kinisi.h', 'kinisi.cpp', 'kinisi_types.h', 'keywords.txt']
     before = {name: (output / name).read_bytes() for name in names}
     for mutate in (
+            lambda s: s['subscription_modes'][1].update(id=2),
+            lambda s: s['subscription_modes'][1].update(id=True),
+            lambda s: s['subscription_modes'][1].update(name='UNKNOWN'),
+            lambda s: next(c for c in s['commands'] if c['command'] == 'SUBSCRIBE_WITH_MODE')['properties'].pop(),
             lambda s: s['topics'][0].update(id=0),
             lambda s: s['topics'][1].update(id=s['topics'][0]['id']),
             lambda s: s['topics'][0].update(payload_type='absent'),

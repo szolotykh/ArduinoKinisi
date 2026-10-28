@@ -12,13 +12,18 @@ supportsSensor	KEYWORD2
 KinisiSensor	KEYWORD1
 KinisiBoardProfile	KEYWORD1
 supportsMotorCurrent	KEYWORD2
+supportsMotorFaults	KEYWORD2
+KinisiSubscriptionMode	KEYWORD1
 KinisiTopic	KEYWORD1
 KinisiTelemetrySample	KEYWORD1
 supportsTopic	KEYWORD2
 getSubscriptionSample	KEYWORD2
+KinisiSubscriptionTrigger	KEYWORD1
+KinisiSubscriptionDelivery	KEYWORD1
 get_temperature	KEYWORD2
 get_imu	KEYWORD2
 get_motor_current	KEYWORD2
+get_motor_faults	KEYWORD2
 initialize_motor	KEYWORD2
 set_motor_speed	KEYWORD2
 stop_motor	KEYWORD2
@@ -77,3 +82,8 @@ initialize_motor_position_pid_controller	KEYWORD2
 initialize_platform_position_pid_controller	KEYWORD2
 subscribe	KEYWORD2
 unsubscribe	KEYWORD2
+subscribe_with_mode	KEYWORD2
+clear_motor_faults	KEYWORD2
+get_motor_current_limit	KEYWORD2
+set_motor_current_limit	KEYWORD2
+subscribe_configured	KEYWORD2

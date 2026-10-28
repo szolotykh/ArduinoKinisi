@@ -5,7 +5,9 @@
 
 enum class KinisiSensor : uint8_t { TEMPERATURE, IMU };
 struct KinisiBoardResources { uint8_t motors, encoders, gpio, status_leds; };
-struct KinisiMotorFeatures { uint8_t id; bool current_sense, current_limit; };
+/** Discrete nominal thresholds in milliamps; count delimits the supported values. */
+struct KinisiCurrentLimitOptions { uint8_t threshold_count; uint16_t supported_thresholds_ma[4]; bool can_disable; };
+struct KinisiMotorFeatures { uint8_t id; bool current_sense, current_limit, fault_reporting; KinisiCurrentLimitOptions current_limit_options; };
 struct KinisiImuFeatures { uint8_t id; bool accelerometer, gyroscope; };
 
 /** Public hardware metadata; counts delimit valid entries in each array. */

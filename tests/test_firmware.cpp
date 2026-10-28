@@ -9,6 +9,8 @@ void bridge_send(const uint8_t*, size_t);
 size_t bridge_read(uint8_t*);
 void bridge_advance(uint32_t);
 unsigned bridge_stops(void);
+unsigned bridge_events(void);
+void bridge_set_angle(double);
 }
 TwoWire Wire;
 MockSerial Serial;
@@ -59,6 +61,28 @@ int main() {
     assert(telemetry.data.encoder_odometry.clock_quality == 1);
     assert(c.unsubscribe(KinisiTopic::ENCODER_ODOMETRY, 0));
     assert(!c.getSubscriptionSample(KinisiTopic::ENCODER_ODOMETRY, 0, telemetry));
+    assert(c.subscribe(KinisiTopic::ENCODER_ODOMETRY, 0, 100, KinisiSubscriptionMode::ON_CHANGE));
+    assert(c.ping()); // Drain an initial event queued immediately after the subscribe ACK.
+    assert(c.getSubscriptionSample(KinisiTopic::ENCODER_ODOMETRY, 0, telemetry));
+    unsigned events = bridge_events();
+    bridge_advance(100000); fake_millis += 100; assert(c.poll());
+    assert(bridge_events() == events);
+    bridge_set_angle(2.5);
+    bridge_advance(100000); fake_millis += 100; assert(c.poll());
+    assert(bridge_events() == events + 1);
+    assert(c.getSubscriptionSample(KinisiTopic::ENCODER_ODOMETRY, 0, telemetry));
+    assert(telemetry.data.encoder_odometry.angle == 2.5);
+    assert(c.unsubscribe(KinisiTopic::ENCODER_ODOMETRY, 0));
+    assert(c.subscribe(KinisiTopic::ENCODER_ODOMETRY, 0, 100, KinisiSubscriptionTrigger::PERIODIC, KinisiSubscriptionDelivery::ON_CHANGE, 200));
+    assert(c.ping());
+    events = bridge_events();
+    bridge_advance(100000); fake_millis += 100; assert(c.poll());
+    assert(bridge_events() == events);
+    bridge_advance(100000); fake_millis += 100; assert(c.poll());
+    assert(bridge_events() == events + 1);
+    assert(c.getSubscriptionSample(KinisiTopic::ENCODER_ODOMETRY, 0, telemetry));
+    assert(telemetry.data.encoder_odometry.angle == 2.5);
+    assert(c.unsubscribe(KinisiTopic::ENCODER_ODOMETRY, 0));
     unsigned previous = bridge_stops();
     bridge_advance(500000); fake_millis += 500;
     assert(!c.poll() && !c.ready());

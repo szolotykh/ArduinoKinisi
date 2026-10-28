@@ -17,12 +17,13 @@ static std::vector<uint8_t> frame(uint8_t command, uint16_t id, std::vector<uint
 }
 
 static std::vector<uint8_t> event() {
-    uint8_t size = event_topic == 2 ? 34 : event_topic == 4 ? 58 : 18;
+    uint8_t size = event_topic == 2 ? 34 : event_topic == 4 ? 58 : event_topic == 6 ? 20 : 18;
     std::vector<uint8_t> payload(size + 2);
     payload[0] = event_topic; payload[1] = event_index;
     kinisi_codec::writeUnsigned(payload.data() + 2, UINT64_C(36028797018963975), 8);
     payload[10] = 0; payload[11] = 1;
-    for (uint8_t offset = 12; offset < payload.size(); offset += 8)
+    if (event_topic == 6) { payload[13] = 1; payload[18] = value != 0; }
+    else for (uint8_t offset = 12; offset < payload.size(); offset += 8)
         kinisi_codec::writeDouble(payload.data() + offset, value);
     return frame(KINISI_TELEMETRY_EVENT, 0, payload);
 }
@@ -38,14 +39,14 @@ static void respond(const std::vector<uint8_t>& r) {
     }
 }
 
-static void reset(uint8_t revision = 4, uint8_t protocol = 7) {
+static void reset(uint8_t revision = 4, uint8_t protocol = 8) {
     Wire = TwoWire(); fake_millis = 0; board = revision; minor = protocol; value = 12.5;
     Wire.responder = respond;
 }
 
 static void topics_and_buffers() {
     reset(); KinisiController c; assert(c.begin());
-    for (uint8_t topic = 1; topic <= 5; ++topic) {
+    for (uint8_t topic = 1; topic <= 6; ++topic) {
         KinisiTopic t = static_cast<KinisiTopic>(topic);
         uint8_t size; uint32_t minimum;
         assert(kinisiTopicInfo(t, 0, size, minimum));
@@ -70,6 +71,7 @@ static void topics_and_buffers() {
             case KinisiTopic::PLATFORM_ODOMETRY: assert(sample.data.platform_odometry.t == value); break;
             case KinisiTopic::TEMPERATURE: assert(sample.data.temperature.celsius == value); break;
             case KinisiTopic::IMU: assert(sample.data.imu.angular_velocity_z == value); break;
+            case KinisiTopic::MOTOR_FAULTS: assert(sample.data.motor_faults.status_valid && sample.data.motor_faults.overcurrent); break;
             case KinisiTopic::MOTOR_CURRENT: assert(sample.data.motor_current.amps == value); break;
         }
         value = 9.0; fake_millis += 500; assert(c.poll());
@@ -169,7 +171,58 @@ static void four_current_streams() {
     assert(!kinisiDecodeTelemetry(KinisiTopic::MOTOR_CURRENT, 3, bytes.data() + 6, 18, sample));
 }
 
+
+static void on_change_mode() {
+    reset(4, 9); KinisiController c; assert(c.begin());
+    auto topic = KinisiTopic::MOTOR_FAULTS;
+    size_t before = Wire.transactions;
+    assert(!c.subscribe(topic, 0, 100, static_cast<KinisiSubscriptionMode>(2)));
+    assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == before);
+    assert(c.subscribe(topic, 0, 100, KinisiSubscriptionMode::ON_CHANGE));
+    assert(Wire.sent == frame(KINISI_SUBSCRIBE_WITH_MODE, Wire.sent[2] | uint16_t(Wire.sent[3]) << 8,
+                             {6, 0, 100, 0, 0, 0, 1}));
+    event_topic = 6; event_index = 0; fake_millis += 100;
+    assert(c.poll()); KinisiTelemetrySample sample;
+    assert(c.getSubscriptionSample(topic, 0, sample) && sample.data.motor_faults.overcurrent);
+    // No new events is normal, and cached state remains available.
+    Wire.responder = [](const std::vector<uint8_t>& r) {
+        Wire.responses.push_back(frame(r[1], r[2] | uint16_t(r[3]) << 8));
+    };
+    for (unsigned i = 0; i < 20; ++i) { fake_millis += 100; assert(c.poll() && c.ready()); }
+    assert(c.getSubscriptionSample(topic, 0, sample));
+    assert(c.subscribe(topic, 0, 100)); assert(Wire.sent[1] == KINISI_SUBSCRIBE);
+    assert(!c.getSubscriptionSample(topic, 0, sample));
+    assert(c.unsubscribe(topic, 0));
+    reset(4, 8); assert(c.begin()); before = Wire.transactions;
+    assert(!c.subscribe(topic, 0, 100, KinisiSubscriptionMode::ON_CHANGE));
+    assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+    assert(c.subscribe(topic, 0, 100));
+    reset(99, 8); assert(c.begin()); before = Wire.transactions;
+    assert(!c.subscribe(topic, 0, 100, KinisiSubscriptionMode::ON_CHANGE));
+    assert(Wire.transactions == before);
+}
+
+static void configured_settings() {
+    reset(4, 12); KinisiController c; assert(c.begin());
+    assert(c.subscribe(KinisiTopic::MOTOR_FAULTS, 0, 0, KinisiSubscriptionTrigger::ON_EVENT, KinisiSubscriptionDelivery::ON_CHANGE, 5000));
+    assert(Wire.sent == frame(KINISI_SUBSCRIBE_CONFIGURED, Wire.sent[2] | uint16_t(Wire.sent[3]) << 8,
+        {6, 0, 0, 0, 0, 0, 1, 1, 0x88, 0x13, 0, 0}));
+    event_topic = 6; event_index = 0; fake_millis += 10; assert(c.poll());
+    KinisiTelemetrySample sample; assert(c.getSubscriptionSample(KinisiTopic::MOTOR_FAULTS, 0, sample));
+    size_t count = Wire.transactions;
+    assert(!c.subscribe(KinisiTopic::MOTOR_FAULTS, 0, 100, KinisiSubscriptionTrigger::ON_EVENT, KinisiSubscriptionDelivery::ON_CHANGE, 5000));
+    assert(!c.subscribe(KinisiTopic::TEMPERATURE, 0, 0, KinisiSubscriptionTrigger::ON_EVENT, KinisiSubscriptionDelivery::ALL));
+    assert(!c.subscribe(KinisiTopic::MOTOR_FAULTS, 0, 0, KinisiSubscriptionTrigger::ON_EVENT, KinisiSubscriptionDelivery::ALL, 5000));
+    assert(Wire.transactions == count);
+    assert(c.unsubscribe(KinisiTopic::MOTOR_FAULTS, 0));
+    reset(4, 11); KinisiController old; assert(old.begin()); count = Wire.transactions;
+    assert(!old.subscribe(KinisiTopic::MOTOR_FAULTS, 0, 0, KinisiSubscriptionTrigger::ON_EVENT, KinisiSubscriptionDelivery::ALL));
+    assert(old.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == count);
+}
+
 int main() {
+    configured_settings();
+    on_change_mode();
     topics_and_buffers(); validation_and_lifecycle(); malformed_and_future_events();
     four_current_streams();
     printf("PASS generic subscriptions, lifecycle and Wire capacity %d\n", KINISI_WIRE_BUFFER_SIZE);

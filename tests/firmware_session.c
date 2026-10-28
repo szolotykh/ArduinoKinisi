@@ -7,7 +7,10 @@
 
 static connection_t connection;
 static uint64_t now_us;
-static unsigned stops;
+static unsigned stops, event_count;
+static double encoder_angle = 1.25;
+void bridge_set_angle(double angle) { encoder_angle = angle; }
+unsigned bridge_events(void) { return event_count; }
 static uint8_t replies[8][256], lengths[8], head, tail;
 
 /** Supply deterministic controller uptime to the production session. */
@@ -23,6 +26,7 @@ unsigned bridge_stops(void) { return stops; }
 /** Capture one complete firmware frame without changing its wire representation. */
 static bool capture(uint8_t* bytes, uint8_t length) {
     assert(tail < 8);
+    if (bytes[1] == KINISI_MESSAGE_TELEMETRY_EVENT) ++event_count;
     memcpy(replies[tail], bytes, length);
     lengths[tail++] = length;
     return true;
@@ -44,7 +48,7 @@ static uint8_t handle(controller_command_t* cmd, protocol_send_fn reply) {
     }
     if (cmd->commandType == GET_PLATFORM_ODOMETRY) return RESPONSE_ODOMETRY_NOT_INITIALIZED;
     if (cmd->commandType == GET_ENCODER_ODOMETRY) {
-        encoder_odometry_sample sample = {now_us / 20000 * 20000, 0, 1, 1.25};
+        encoder_odometry_sample sample = {now_us / 20000 * 20000, 0, 1, encoder_angle};
         reply((uint8_t *)&sample, sizeof(sample));
         return RESPONSE_OK;
     }
@@ -54,7 +58,8 @@ static uint8_t handle(controller_command_t* cmd, protocol_send_fn reply) {
 void bridge_reset(void) {
     head = tail = 0;
     now_us = 1000000;
-    stops = 0;
+    stops = event_count = 0;
+    encoder_angle = 1.25;
     connection_init(&connection, handle, capture, now);
     connection.services.stop = stop;
     connection.services.calculation_period_ms = period;

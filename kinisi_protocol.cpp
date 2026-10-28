@@ -148,11 +148,34 @@ bool KinisiProtocol::supportsSensor(KinisiSensor kind, uint8_t index) const {
     }
 }
 
+const KinisiCurrentLimitOptions* KinisiProtocol::getMotorCurrentLimitOptions(uint8_t index) const {
+    if (!profile_known_) return nullptr;
+    for (uint8_t i = 0; i < profile_.resources.motors; ++i) {
+        const KinisiMotorFeatures& motor = profile_.motor_features[i];
+        if (motor.id == index && motor.current_limit && motor.current_limit_options.threshold_count)
+            return &motor.current_limit_options;
+    }
+    return nullptr;
+}
+
+bool KinisiProtocol::supportsMotorCurrentLimit(uint8_t index) const {
+    return ready_ && identity_.protocol_major == 2 && identity_.protocol_minor >= 11 &&
+        KINISI_WIRE_BUFFER_SIZE >= 8 && getMotorCurrentLimitOptions(index);
+}
+
 bool KinisiProtocol::supportsMotorCurrent(uint8_t index) const {
     if (!ready_ || !profile_known_ || identity_.protocol_major != 2 || identity_.protocol_minor < 7 ||
             KINISI_WIRE_BUFFER_SIZE < 12) return false;
     for (uint8_t i = 0; i < profile_.resources.motors; ++i)
         if (profile_.motor_features[i].id == index) return profile_.motor_features[i].current_sense;
+    return false;
+}
+
+bool KinisiProtocol::supportsMotorFaults(uint8_t index) const {
+    if (!ready_ || !profile_known_ || identity_.protocol_major != 2 || identity_.protocol_minor < 8 ||
+            KINISI_WIRE_BUFFER_SIZE < 14) return false;
+    for (uint8_t i = 0; i < profile_.resources.motors; ++i)
+        if (profile_.motor_features[i].id == index) return profile_.motor_features[i].fault_reporting;
     return false;
 }
 
@@ -166,6 +189,7 @@ bool KinisiProtocol::supportsTopic(KinisiTopic topic, uint8_t index) const {
         case KinisiTopic::PLATFORM_ODOMETRY: return true;
         case KinisiTopic::TEMPERATURE: return profile_.hasSensor(KinisiSensor::TEMPERATURE, index);
         case KinisiTopic::IMU: return profile_.hasSensor(KinisiSensor::IMU, index);
+        case KinisiTopic::MOTOR_FAULTS: return supportsMotorFaults(index);
         case KinisiTopic::MOTOR_CURRENT: return supportsMotorCurrent(index);
         default: return false;
     }
@@ -203,7 +227,13 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         case KINISI_INITIALIZE_PLATFORM_POSITION_PID_CONTROLLER: required_minor = 3; break;
         case KINISI_GET_TEMPERATURE: required_minor = 4; break;
         case KINISI_GET_IMU: required_minor = 5; break;
+        case KINISI_GET_MOTOR_CURRENT_LIMIT:
+        case KINISI_SET_MOTOR_CURRENT_LIMIT: required_minor = 11; break;
+        case KINISI_CLEAR_MOTOR_FAULTS: required_minor = 10; break;
+        case KINISI_GET_MOTOR_FAULTS: required_minor = 8; break;
         case KINISI_GET_MOTOR_CURRENT: required_minor = 7; break;
+        case KINISI_SUBSCRIBE_CONFIGURED: required_minor = 12; break;
+        case KINISI_SUBSCRIBE_WITH_MODE: required_minor = 9; break;
         case KINISI_SUBSCRIBE:
         case KINISI_UNSUBSCRIBE: required_minor = 6; break;
         default: break;
@@ -211,17 +241,28 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     if (identity_.protocol_minor < required_minor)
         return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
     int subscription_slot = -1;
-    if (command == KINISI_SUBSCRIBE || command == KINISI_UNSUBSCRIBE) {
+    if (command == KINISI_SUBSCRIBE || command == KINISI_SUBSCRIBE_WITH_MODE || command == KINISI_SUBSCRIBE_CONFIGURED || command == KINISI_UNSUBSCRIBE) {
         const KinisiTopic topic = static_cast<KinisiTopic>(payload[0]);
+        if (topic == KinisiTopic::MOTOR_FAULTS && identity_.protocol_minor < 8)
+            return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
         if (topic == KinisiTopic::MOTOR_CURRENT && identity_.protocol_minor < 7)
             return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
         uint8_t size; uint32_t minimum;
         if (!kinisiTopicInfo(topic, payload[1], size, minimum))
             return fail(KinisiFailure::INVALID_ARGUMENT, command, 0);
         subscription_slot = findSubscription(topic, payload[1]);
-        if (command == KINISI_SUBSCRIBE) {
+        if (command == KINISI_SUBSCRIBE || command == KINISI_SUBSCRIBE_WITH_MODE || command == KINISI_SUBSCRIBE_CONFIGURED) {
             uint32_t interval = uint32_t(kinisi_codec::readUnsigned(payload + 2, 4));
-            if (interval < minimum || interval > 3600000)
+            if (command == KINISI_SUBSCRIBE_CONFIGURED) {
+                if (length != 12) return fail(KinisiFailure::INVALID_ARGUMENT, command, 0);
+                uint32_t silence = uint32_t(kinisi_codec::readUnsigned(payload + 8, 4));
+                bool event = payload[6] == uint8_t(KinisiSubscriptionTrigger::ON_EVENT);
+                if (payload[6] > 1 || payload[7] > 1 || interval > 3600000 || silence > 3600000 ||
+                    (event ? (interval != 0 || !kinisiTopicEventSupported(topic)) : interval < minimum) ||
+                    (silence && (payload[7] != uint8_t(KinisiSubscriptionDelivery::ON_CHANGE) || silence < minimum)))
+                    return fail(KinisiFailure::INVALID_ARGUMENT, command, 0);
+            } else if ((command == KINISI_SUBSCRIBE_WITH_MODE && (length != 7 || payload[6] > uint8_t(KinisiSubscriptionMode::ON_CHANGE))) ||
+                interval < minimum || interval > 3600000)
                 return fail(KinisiFailure::INVALID_ARGUMENT, command, 0);
             if (size + 6 > KINISI_WIRE_BUFFER_SIZE || size + 6 > 64)
                 return fail(KinisiFailure::FRAME_TOO_LARGE, command, 0);
@@ -234,7 +275,27 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
             if (subscription_slot < 0) return fail(KinisiFailure::SUBSCRIPTION_LIMIT, command, 0);
         }
     }
+    const bool current_limit = command == KINISI_GET_MOTOR_CURRENT_LIMIT || command == KINISI_SET_MOTOR_CURRENT_LIMIT;
+    if (current_limit) {
+        if (payload[0] > 3) return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+        const KinisiCurrentLimitOptions* options = getMotorCurrentLimitOptions(payload[0]);
+        if (profile_known_ && !options)
+            return fail(KinisiFailure::SENSOR_NOT_AVAILABLE, command, 0, KinisiErrorCode::SENSOR_NOT_AVAILABLE);
+        if (command == KINISI_SET_MOTOR_CURRENT_LIMIT) {
+            uint16_t threshold = uint16_t(kinisi_codec::readUnsigned(payload + 2, 2));
+            bool allowed = options == nullptr;
+            if (options) for (uint8_t i = 0; i < options->threshold_count; ++i)
+                allowed |= threshold == options->supported_thresholds_ma[i];
+            if (!threshold || !allowed || (options && !payload[1] && !options->can_disable))
+                return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+        }
+    }
     const bool sensor_read = command == KINISI_GET_TEMPERATURE || command == KINISI_GET_IMU;
+    const bool fault_read = command == KINISI_GET_MOTOR_FAULTS || command == KINISI_CLEAR_MOTOR_FAULTS;
+    if (fault_read && payload[0] > 3)
+        return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    if (fault_read && profile_known_ && !supportsMotorFaults(payload[0]))
+        return fail(KinisiFailure::SENSOR_NOT_AVAILABLE, command, 0, KinisiErrorCode::SENSOR_NOT_AVAILABLE);
     const bool current_read = command == KINISI_GET_MOTOR_CURRENT;
     if (current_read && payload[0] > 3)
         return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
@@ -249,6 +310,12 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     uint32_t started = millis();
     if (!send(command, id, payload, length, response_length) ||
         !receive(command, command, id, response, response_length, started)) return false;
+    if (current_limit && (response[0] > 1 || !kinisi_codec::readUnsigned(response + 1, 2)))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (fault_read) {
+        for (uint8_t i = 0; i < response_length; ++i)
+            if (response[i] > 1) return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    }
     if (current_read && kinisi_codec::readDouble(response) < 0)
         return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
     if (sensor_read || current_read) {
@@ -259,13 +326,18 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     if (command == KINISI_SET_HEARTBEAT_CONFIG) {
         heartbeat_ms_ = payload[0] ? uint32_t(kinisi_codec::readUnsigned(payload + 1, 4)) : 0;
         if (!heartbeat_ms_) { memset(subscription_ms_, 0, sizeof(subscription_ms_)); sample_mask_ = 0; clearSubscriptions(); }
-    } else if (command == KINISI_SUBSCRIBE || command == KINISI_UNSUBSCRIBE) {
+    } else if (command == KINISI_SUBSCRIBE || command == KINISI_SUBSCRIBE_WITH_MODE || command == KINISI_SUBSCRIBE_CONFIGURED || command == KINISI_UNSUBSCRIBE) {
         KinisiTopic topic = static_cast<KinisiTopic>(payload[0]);
         if (subscription_slot >= 0) {
             SubscriptionSlot& slot = subscriptions_[subscription_slot];
             slot = {};
-            if (command == KINISI_SUBSCRIBE) {
+            if (command == KINISI_SUBSCRIBE || command == KINISI_SUBSCRIBE_WITH_MODE || command == KINISI_SUBSCRIBE_CONFIGURED) {
                 slot.interval_ms = uint32_t(kinisi_codec::readUnsigned(payload + 2, 4));
+                if (command == KINISI_SUBSCRIBE_CONFIGURED) {
+                    uint32_t silence = uint32_t(kinisi_codec::readUnsigned(payload + 8, 4));
+                    if (!slot.interval_ms) slot.interval_ms = 10; // I2C master services event notifications.
+                    if (silence && silence < slot.interval_ms) slot.interval_ms = silence;
+                }
                 slot.sample.topic = topic;
                 slot.sample.index = payload[1];
                 last_poll_ms_ = millis();

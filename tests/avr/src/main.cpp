@@ -43,6 +43,20 @@ void setup() {
     if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(sample.acceleration_z);
     if (controller.supportsTopic(KinisiTopic::TEMPERATURE))
         controller.subscribe(KinisiTopic::TEMPERATURE, 0, 250);
+    if (controller.supportsMotorFaults(0)) {
+        motor_fault_status status = controller.get_motor_faults(0);
+        if (controller.boardInfo().protocol_minor >= 10) status = controller.clear_motor_faults(0);
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(status.status_valid);
+        if (controller.boardInfo().protocol_minor >= 12)
+            controller.subscribe(KinisiTopic::MOTOR_FAULTS, 0, 0, KinisiSubscriptionTrigger::ON_EVENT, KinisiSubscriptionDelivery::ON_CHANGE, 5000);
+        else controller.subscribe(KinisiTopic::MOTOR_FAULTS, 0, 100, KinisiSubscriptionMode::ON_CHANGE);
+    }
+    if (controller.supportsMotorCurrentLimit(0)) {
+        const KinisiCurrentLimitOptions* options = controller.getMotorCurrentLimitOptions(0);
+        motor_current_limit setting = controller.get_motor_current_limit(0);
+        if (options) setting = controller.set_motor_current_limit(0, true, options->supported_thresholds_ma[0]);
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(setting.threshold_ma);
+    }
     if (controller.supportsMotorCurrent(0)) {
         double amps = controller.get_motor_current(0);
         if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(amps);
@@ -56,6 +70,8 @@ void loop() {
     KinisiTelemetrySample sample;
     if (controller.getSubscriptionSample(KinisiTopic::TEMPERATURE, 0, sample))
         Serial.println(sample.data.temperature.celsius);
+    if (controller.getSubscriptionSample(KinisiTopic::MOTOR_FAULTS, 0, sample))
+        Serial.println(sample.data.motor_faults.overcurrent);
     if (controller.getSubscriptionSample(KinisiTopic::MOTOR_CURRENT, 0, sample))
         Serial.println(sample.data.motor_current.amps);
 }
