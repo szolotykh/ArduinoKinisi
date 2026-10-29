@@ -31,7 +31,7 @@ def check_incompatible_schemas(schema, output):
             raise AssertionError(f'Accepted incompatible schema: {version}')
         assert before == {name: (output / name).read_bytes() for name in names}
     print('PASS incompatible schemas preserve generated library files', flush=True)
-    for missing in [{'GET_TEMPERATURE'}, {'GET_IMU'}, {'GET_MOTOR_CURRENT'}, {'GET_MOTOR_FAULTS'}, {'SUBSCRIBE_CONFIGURED'}, {'GET_MOTOR_CURRENT_LIMIT'}, {'SET_MOTOR_CURRENT_LIMIT'}, {'GET_TEMPERATURE', 'GET_IMU'}]:
+    for missing in [{'GET_PWM_FREQUENCY'}, {'SET_PWM_FREQUENCY'}, {'GET_TEMPERATURE'}, {'GET_IMU'}, {'GET_MOTOR_CURRENT'}, {'GET_MOTOR_FAULTS'}, {'SUBSCRIBE_CONFIGURED'}, {'GET_MOTOR_CURRENT_LIMIT'}, {'SET_MOTOR_CURRENT_LIMIT'}, {'GET_TEMPERATURE', 'GET_IMU'}]:
         incompatible = deepcopy(schema)
         incompatible['commands'] = [c for c in incompatible['commands'] if c['command'] not in missing]
         if 'SUBSCRIBE_CONFIGURED' in missing:
@@ -45,6 +45,20 @@ def check_incompatible_schemas(schema, output):
             raise AssertionError(f'Accepted missing sensor dependencies: {missing}')
         assert before == {name: (output / name).read_bytes() for name in names}
     print('PASS missing sensor commands preserve generated files', flush=True)
+    for mutate in (
+            lambda s: s.pop('pwm_frequencies'),
+            lambda s: s['pwm_frequencies'][0].update(id=True),
+            lambda s: s['pwm_frequencies'][0].update(name='BAD'),
+            lambda s: next(c for c in s['commands'] if c['command'] == 'SET_PWM_FREQUENCY')['properties'][0].update(type='uint16_t')):
+        incompatible = deepcopy(schema)
+        mutate(incompatible)
+        try:
+            generate(incompatible, output)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('Accepted invalid PWM catalog/layout')
+        assert before == {name: (output / name).read_bytes() for name in names}
 
 
 def check_future_schemas(schema, output):

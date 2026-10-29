@@ -14,7 +14,23 @@ HEADER = '// Generated from tools/commands.json; edit the schema or generator in
 SESSION_COMMANDS = {'PING', 'SET_HEARTBEAT_CONFIG', 'SUBSCRIBE_ODOMETRY',
                     'UNSUBSCRIBE_ODOMETRY', 'ENCODER_ODOMETRY_EVENT',
                     'PLATFORM_ODOMETRY_EVENT', 'POLL_TELEMETRY', 'GET_TEMPERATURE', 'GET_IMU',
-                    'GET_MOTOR_CURRENT', 'GET_MOTOR_FAULTS', 'CLEAR_MOTOR_FAULTS', 'GET_MOTOR_CURRENT_LIMIT', 'SET_MOTOR_CURRENT_LIMIT', 'SUBSCRIBE', 'SUBSCRIBE_WITH_MODE', 'UNSUBSCRIBE', 'TELEMETRY_EVENT', 'SUBSCRIBE_CONFIGURED'}
+                    'GET_MOTOR_CURRENT', 'GET_MOTOR_FAULTS', 'CLEAR_MOTOR_FAULTS', 'GET_PWM_FREQUENCY', 'SET_PWM_FREQUENCY', 'GET_MOTOR_CURRENT_LIMIT', 'SET_MOTOR_CURRENT_LIMIT', 'SUBSCRIBE', 'SUBSCRIBE_WITH_MODE', 'UNSUBSCRIBE', 'TELEMETRY_EVENT', 'SUBSCRIBE_CONFIGURED'}
+
+
+
+def validate_pwm_frequency(schema):
+    values = schema.get('pwm_frequencies', [])
+    expected = [(v, 'KHZ_' + str(v // 1000)) for v in (10000, 20000, 25000, 50000, 100000)]
+    if [(v.get('id'), v.get('name')) for v in values] != expected or any(type(v.get('id')) is not int for v in values):
+        raise ValueError('Invalid PWM frequency catalog')
+    commands = {c['command']: c for c in schema.get('commands', [])}
+    for name in ('GET_PWM_FREQUENCY', 'SET_PWM_FREQUENCY'):
+        command = commands.get(name, {})
+        properties = [(p['name'], p['type'], p.get('enum')) for p in command.get('properties', [])]
+        expected_props = [] if name.startswith('GET') else [('frequency_hz', 'uint32_t', 'pwm_frequency')]
+        if (not command or command.get('direction') != 'client_to_controller' or properties != expected_props or
+                command.get('response', {}).get('type') != 'uint32_t'):
+            raise ValueError('Invalid ' + name + ' envelope')
 
 
 def public_commands(schema):
@@ -38,6 +54,7 @@ def generate(schema, output, check=False):
     if missing:
         raise ValueError('Schema is missing runtime commands: ' + ', '.join(sorted(missing)))
     validate_metadata(schema, SIZES)
+    validate_pwm_frequency(schema)
     objects = {o['name']: o for o in schema['objects']}
     for c in schema['commands']:
         if c.get('direction') not in ('client_to_controller', 'controller_to_client'):
@@ -65,6 +82,10 @@ def generate(schema, output, check=False):
         for item in schema.get(key, []):
             types.append(f"    {item['name']} = {item['id']},\n")
         types.append('};\n')
+    types.append('enum class KinisiPwmFrequency : uint32_t {\n')
+    for item in schema['pwm_frequencies']:
+        types.append(f"    {item['name']} = {item['id']}UL,\n")
+    types.append('};\n')
     types.append('\n/** Delivery behavior for generic subscriptions. */\nenum class KinisiSubscriptionMode : uint8_t {\n')
     for mode in schema['subscription_modes']:
         types.append(f"    {mode['name']} = {mode['id']},\n")
@@ -80,6 +101,7 @@ def generate(schema, output, check=False):
         types.append('    } data;\n};\n')
         types.append('bool kinisiTopicInfo(KinisiTopic topic, uint8_t index, uint8_t& size, uint32_t& minimum_ms);\n')
         types.append('bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payload, uint8_t size, KinisiTelemetrySample& sample);\n')
+    types.append('bool kinisiPwmFrequencyValid(uint32_t frequency);\n')
     types.append('#endif\n')
     header = [HEADER, '#ifndef KINISI_H\n#define KINISI_H\n#include "kinisi_protocol.h"\n\n',
               '/** Blocking I2C client. begin() completes API-v2 INIT and READY in uptime mode. */\n',
@@ -87,6 +109,8 @@ def generate(schema, output, check=False):
               '    /** Select a seven-bit I2C address (default 8). Does not touch the bus. */\n',
               '    explicit KinisiController(uint8_t address = 8) : KinisiProtocol(address) {}\n']
     source = [HEADER, '#include "kinisi.h"\n#include "kinisi_codec.h"\n#include <math.h>\n']
+    condition = ' || '.join('frequency == ' + str(item['id']) + 'UL' for item in schema['pwm_frequencies'])
+    source.append(f'bool kinisiPwmFrequencyValid(uint32_t frequency) {{ return {condition}; }}\n')
     if topics:
         source.append('\nbool kinisiTopicInfo(KinisiTopic topic, uint8_t index, uint8_t& size, uint32_t& minimum_ms) {\n    switch (topic) {\n')
         for topic in topics:
@@ -124,7 +148,7 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
         source.append('\nbool kinisiTopicEventSupported(KinisiTopic topic) { return ' + (' || '.join('uint8_t(topic) == ' + str(i) for i in event_ids) or 'false') + '; }\n')
     for c in public_commands(schema):
         props = c.get('properties', [])
-        args = ', '.join(({'telemetry_topic': 'KinisiTopic', 'subscription_mode': 'KinisiSubscriptionMode', 'subscription_trigger': 'KinisiSubscriptionTrigger', 'subscription_delivery': 'KinisiSubscriptionDelivery'}.get(p.get('enum'), p['type'])) + ' ' + p['name'] for p in props)
+        args = ', '.join(({'telemetry_topic': 'KinisiTopic', 'subscription_mode': 'KinisiSubscriptionMode', 'subscription_trigger': 'KinisiSubscriptionTrigger', 'subscription_delivery': 'KinisiSubscriptionDelivery', 'pwm_frequency': 'KinisiPwmFrequency'}.get(p.get('enum'), p['type'])) + ' ' + p['name'] for p in props)
         if c['command'] == 'SUBSCRIBE':
             args += ', KinisiSubscriptionMode mode'
         velocity = c['command'] in ('INITIALIZE_MOTOR_CONTROLLER', 'START_PLATFORM_CONTROLLER')
@@ -173,7 +197,7 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
     if topics:
         keywords += 'KinisiSubscriptionMode\tKEYWORD1\nKinisiTopic\tKEYWORD1\nKinisiTelemetrySample\tKEYWORD1\nsupportsTopic\tKEYWORD2\ngetSubscriptionSample\tKEYWORD2\n'
     if schema.get('subscription_triggers'):
-        keywords += 'KinisiSubscriptionTrigger\tKEYWORD1\nKinisiSubscriptionDelivery\tKEYWORD1\n'
+        keywords += 'KinisiPwmFrequency\tKEYWORD1\nKinisiSubscriptionTrigger\tKEYWORD1\nKinisiSubscriptionDelivery\tKEYWORD1\n'
     keywords += ''.join(c['command'].lower() + '\tKEYWORD2\n' for c in public_commands(schema))
     if not check:
         output.mkdir(parents=True, exist_ok=True)

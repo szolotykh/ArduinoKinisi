@@ -10,10 +10,10 @@
 
 namespace {
 const KinisiBoardProfile profiles[] KINISI_PROFILE_STORAGE = {
-    {1, 0, 1, 0, {4, 1, 4, 1}, {{0, false, false, false, {0, {0}, false}}, {1, false, false, false, {0, {0}, false}}, {2, false, false, false, {0, {0}, false}}, {3, false, false, false, {0, {0}, false}}}, 0, {0}, 0, {{}}},
-    {1, 0, 2, 0, {4, 4, 4, 1}, {{0, false, false, false, {0, {0}, false}}, {1, false, false, false, {0, {0}, false}}, {2, false, false, false, {0, {0}, false}}, {3, false, false, false, {0, {0}, false}}}, 0, {0}, 0, {{}}},
-    {1, 0, 3, 0, {4, 4, 10, 1}, {{0, false, false, false, {0, {0}, false}}, {1, false, false, false, {0, {0}, false}}, {2, false, false, false, {0, {0}, false}}, {3, false, false, false, {0, {0}, false}}}, 0, {0}, 0, {{}}},
-    {1, 0, 4, 0, {4, 4, 8, 1}, {{0, true, true, true, {4, {4000, 5400, 6500, 7000}, true}}, {1, true, true, true, {4, {4000, 5400, 6500, 7000}, true}}, {2, true, true, true, {4, {4000, 5400, 6500, 7000}, true}}, {3, true, true, true, {4, {4000, 5400, 6500, 7000}, true}}}, 1, {0}, 1, {{0, true, true}}},
+    {1, 0, 1, 0, {4, 1, 4, 1}, {100000UL, 5, {10000UL, 20000UL, 25000UL, 50000UL, 100000UL}}, {{0, false, false, false, {0, {0}, false}}, {1, false, false, false, {0, {0}, false}}, {2, false, false, false, {0, {0}, false}}, {3, false, false, false, {0, {0}, false}}}, 0, {0}, 0, {{}}},
+    {1, 0, 2, 0, {4, 4, 4, 1}, {100000UL, 5, {10000UL, 20000UL, 25000UL, 50000UL, 100000UL}}, {{0, false, false, false, {0, {0}, false}}, {1, false, false, false, {0, {0}, false}}, {2, false, false, false, {0, {0}, false}}, {3, false, false, false, {0, {0}, false}}}, 0, {0}, 0, {{}}},
+    {1, 0, 3, 0, {4, 4, 10, 1}, {100000UL, 5, {10000UL, 20000UL, 25000UL, 50000UL, 100000UL}}, {{0, false, false, false, {0, {0}, false}}, {1, false, false, false, {0, {0}, false}}, {2, false, false, false, {0, {0}, false}}, {3, false, false, false, {0, {0}, false}}}, 0, {0}, 0, {{}}},
+    {1, 0, 4, 0, {4, 4, 8, 1}, {100000UL, 5, {10000UL, 20000UL, 25000UL, 50000UL, 100000UL}}, {{0, true, true, true, {4, {4000, 5400, 6500, 7000}, true}}, {1, true, true, true, {4, {4000, 5400, 6500, 7000}, true}}, {2, true, true, true, {4, {4000, 5400, 6500, 7000}, true}}, {3, true, true, true, {4, {4000, 5400, 6500, 7000}, true}}}, 1, {0}, 1, {{0, true, true}}},
 };
 }
 
