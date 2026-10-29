@@ -148,6 +148,14 @@ bool KinisiProtocol::supportsSensor(KinisiSensor kind, uint8_t index) const {
     }
 }
 
+const KinisiPwmFrequencyOptions* KinisiProtocol::getPwmFrequencyOptions() const {
+    return profile_known_ && profile_.pwm_frequency.frequency_count ? &profile_.pwm_frequency : nullptr;
+}
+bool KinisiProtocol::supportsPwmFrequency() const {
+    return ready_ && identity_.protocol_major == 2 && identity_.protocol_minor >= 13 &&
+        KINISI_WIRE_BUFFER_SIZE >= 8 && getPwmFrequencyOptions();
+}
+
 const KinisiCurrentLimitOptions* KinisiProtocol::getMotorCurrentLimitOptions(uint8_t index) const {
     if (!profile_known_) return nullptr;
     for (uint8_t i = 0; i < profile_.resources.motors; ++i) {
@@ -229,6 +237,8 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         case KINISI_GET_IMU: required_minor = 5; break;
         case KINISI_GET_MOTOR_CURRENT_LIMIT:
         case KINISI_SET_MOTOR_CURRENT_LIMIT: required_minor = 11; break;
+        case KINISI_GET_PWM_FREQUENCY:
+        case KINISI_SET_PWM_FREQUENCY: required_minor = 13; break;
         case KINISI_CLEAR_MOTOR_FAULTS: required_minor = 10; break;
         case KINISI_GET_MOTOR_FAULTS: required_minor = 8; break;
         case KINISI_GET_MOTOR_CURRENT: required_minor = 7; break;
@@ -273,6 +283,16 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
                     if (!subscriptions_[i].interval_ms) { subscription_slot = i; break; }
             }
             if (subscription_slot < 0) return fail(KinisiFailure::SUBSCRIPTION_LIMIT, command, 0);
+        }
+    }
+    if (command == KINISI_GET_PWM_FREQUENCY || command == KINISI_SET_PWM_FREQUENCY) {
+        const KinisiPwmFrequencyOptions* options = getPwmFrequencyOptions();
+        if (profile_known_ && !options) return fail(KinisiFailure::SENSOR_NOT_AVAILABLE, command, 0, KinisiErrorCode::SENSOR_NOT_AVAILABLE);
+        if (command == KINISI_SET_PWM_FREQUENCY) {
+            uint32_t frequency = uint32_t(kinisi_codec::readUnsigned(payload, 4));
+            bool allowed = options == nullptr;
+            if (options) for (uint8_t i = 0; i < options->frequency_count; ++i) allowed |= options->supported_hz[i] == frequency;
+            if (!allowed || !kinisiPwmFrequencyValid(frequency)) return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
         }
     }
     const bool current_limit = command == KINISI_GET_MOTOR_CURRENT_LIMIT || command == KINISI_SET_MOTOR_CURRENT_LIMIT;

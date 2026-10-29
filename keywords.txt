@@ -18,6 +18,7 @@ KinisiTopic	KEYWORD1
 KinisiTelemetrySample	KEYWORD1
 supportsTopic	KEYWORD2
 getSubscriptionSample	KEYWORD2
+KinisiPwmFrequency	KEYWORD1
 KinisiSubscriptionTrigger	KEYWORD1
 KinisiSubscriptionDelivery	KEYWORD1
 get_temperature	KEYWORD2
@@ -87,3 +88,5 @@ clear_motor_faults	KEYWORD2
 get_motor_current_limit	KEYWORD2
 set_motor_current_limit	KEYWORD2
 subscribe_configured	KEYWORD2
+get_pwm_frequency	KEYWORD2
+set_pwm_frequency	KEYWORD2

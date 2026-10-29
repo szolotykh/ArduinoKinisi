@@ -2,6 +2,7 @@
 #include "kinisi.h"
 #include "kinisi_codec.h"
 #include <math.h>
+bool kinisiPwmFrequencyValid(uint32_t frequency) { return frequency == 10000UL || frequency == 20000UL || frequency == 25000UL || frequency == 50000UL || frequency == 100000UL; }
 
 bool kinisiTopicInfo(KinisiTopic topic, uint8_t index, uint8_t& size, uint32_t& minimum_ms) {
     switch (topic) {
@@ -764,4 +765,25 @@ bool KinisiController::subscribe_configured(KinisiTopic topic_id, uint8_t index,
     kinisi_codec::writeUnsigned(payload + 7, static_cast<uint64_t>(delivery), 1);
     kinisi_codec::writeUnsigned(payload + 8, static_cast<uint64_t>(max_silence_ms), 4);
     return request(KINISI_SUBSCRIBE_CONFIGURED, payload, 12, nullptr, 0);
+}
+
+/** Encode GET_PWM_FREQUENCY, match its reply, and decode the payload. */
+uint32_t KinisiController::get_pwm_frequency() {
+    uint8_t payload[1] = {0};
+    uint32_t result = {};
+    uint8_t response[4] = {0};
+    if (!request(KINISI_GET_PWM_FREQUENCY, payload, 0, response, 4)) return result;
+    result = static_cast<uint32_t>(kinisi_codec::readUnsigned(response, 4));
+    return result;
+}
+
+/** Encode SET_PWM_FREQUENCY, match its reply, and decode the payload. */
+uint32_t KinisiController::set_pwm_frequency(KinisiPwmFrequency frequency_hz) {
+    uint8_t payload[4] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(frequency_hz), 4);
+    uint32_t result = {};
+    uint8_t response[4] = {0};
+    if (!request(KINISI_SET_PWM_FREQUENCY, payload, 4, response, 4)) return result;
+    result = static_cast<uint32_t>(kinisi_codec::readUnsigned(response, 4));
+    return result;
 }

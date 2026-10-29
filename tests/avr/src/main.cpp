@@ -51,6 +51,12 @@ void setup() {
             controller.subscribe(KinisiTopic::MOTOR_FAULTS, 0, 0, KinisiSubscriptionTrigger::ON_EVENT, KinisiSubscriptionDelivery::ON_CHANGE, 5000);
         else controller.subscribe(KinisiTopic::MOTOR_FAULTS, 0, 100, KinisiSubscriptionMode::ON_CHANGE);
     }
+    if (controller.supportsPwmFrequency()) {
+        uint32_t frequency = controller.set_pwm_frequency(KinisiPwmFrequency::KHZ_25);
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(frequency);
+        frequency = controller.get_pwm_frequency();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(frequency);
+    }
     if (controller.supportsMotorCurrentLimit(0)) {
         const KinisiCurrentLimitOptions* options = controller.getMotorCurrentLimitOptions(0);
         motor_current_limit setting = controller.get_motor_current_limit(0);

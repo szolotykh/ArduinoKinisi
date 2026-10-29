@@ -212,5 +212,11 @@ public:
 
     /** Create or replace a subscription with independent trigger and delivery settings. Send an initial snapshot. PERIODIC uses poll_interval_ms; ON_EVENT requires zero polling interval and an event-capable source. ON_CHANGE suppresses unchanged values, excluding timestamp and clock metadata; max_silence_ms requests fresh refreshes, or zero disables refreshes. Delivery is best effort and requires READY and heartbeat. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, CLOCK_NOT_READY, ODOMETRY_NOT_INITIALIZED, SENSOR_NOT_AVAILABLE, INTERNAL_ERROR, SUBSCRIPTION_LIMIT, SAMPLE_OUT_OF_RANGE. Check lastError() after getters; setters return success. */
     bool subscribe_configured(KinisiTopic topic_id, uint8_t index, uint32_t poll_interval_ms, KinisiSubscriptionTrigger trigger, KinisiSubscriptionDelivery delivery, uint32_t max_silence_ms);
+
+    /** Read the board-wide motor PWM frequency in hertz. Does not initialize motors or change outputs. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, CLOCK_NOT_READY, INTERNAL_ERROR. Check lastError() after getters; setters return success. */
+    uint32_t get_pwm_frequency();
+
+    /** Stop all motors and motor/platform controllers, then set the board-wide PWM frequency. All motors remain stopped. The setting survives motor initialization and connection changes; reboot restores the board default. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, CLOCK_NOT_READY, INTERNAL_ERROR. Check lastError() after getters; setters return success. */
+    uint32_t set_pwm_frequency(KinisiPwmFrequency frequency_hz);
 };
 #endif

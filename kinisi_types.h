@@ -81,6 +81,8 @@ static const uint8_t KINISI_CLEAR_MOTOR_FAULTS = 0x54;
 static const uint8_t KINISI_GET_MOTOR_CURRENT_LIMIT = 0x55;
 static const uint8_t KINISI_SET_MOTOR_CURRENT_LIMIT = 0x56;
 static const uint8_t KINISI_SUBSCRIBE_CONFIGURED = 0x84;
+static const uint8_t KINISI_GET_PWM_FREQUENCY = 0x57;
+static const uint8_t KINISI_SET_PWM_FREQUENCY = 0x58;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -259,6 +261,13 @@ enum class KinisiSubscriptionDelivery : uint8_t {
     ALL = 0,
     ON_CHANGE = 1,
 };
+enum class KinisiPwmFrequency : uint32_t {
+    KHZ_10 = 10000UL,
+    KHZ_20 = 20000UL,
+    KHZ_25 = 25000UL,
+    KHZ_50 = 50000UL,
+    KHZ_100 = 100000UL,
+};
 
 /** Delivery behavior for generic subscriptions. */
 enum class KinisiSubscriptionMode : uint8_t {
@@ -291,5 +300,6 @@ struct KinisiTelemetrySample {
 };
 bool kinisiTopicInfo(KinisiTopic topic, uint8_t index, uint8_t& size, uint32_t& minimum_ms);
 bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payload, uint8_t size, KinisiTelemetrySample& sample);
+bool kinisiPwmFrequencyValid(uint32_t frequency);
 #endif
 bool kinisiTopicEventSupported(KinisiTopic topic);

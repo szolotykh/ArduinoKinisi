@@ -319,7 +319,41 @@ static void current_limits() {
     }
 }
 
+static void pwm_frequencies() {
+    KinisiController c;
+    for (uint8_t board = 1; board <= 4; ++board) {
+        reset(board, 13); assert(c.begin(1000, 0));
+        assert(c.supportsPwmFrequency());
+        const KinisiPwmFrequencyOptions* options = c.getPwmFrequencyOptions();
+        assert(options && options->default_hz == 100000UL && options->frequency_count == 5);
+        const uint32_t expected[] = {10000UL, 20000UL, 25000UL, 50000UL, 100000UL};
+        for (uint8_t i=0; i<5; ++i) assert(options->supported_hz[i] == expected[i]);
+        Wire.responder = [](const std::vector<uint8_t>& r) {
+            if (r[1] == KINISI_SET_PWM_FREQUENCY) assert(r.size() == 8 && r[4] == 0xa8 && r[5] == 0x61 && r[6] == 0 && r[7] == 0);
+            else assert(r[1] == KINISI_GET_PWM_FREQUENCY && r.size() == 4);
+            Wire.responses.push_back(frame(r[1], r[2] | uint16_t(r[3]) << 8, {0xa8, 0x61, 0, 0}));
+        };
+        assert(c.set_pwm_frequency(KinisiPwmFrequency::KHZ_25) == 25000UL);
+        assert(c.lastError().failure == KinisiFailure::NONE);
+        assert(c.get_pwm_frequency() == 25000UL);
+        size_t before = Wire.transactions;
+        c.set_pwm_frequency(static_cast<KinisiPwmFrequency>(12345));
+        assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == before);
+    }
+    reset(4, 12); assert(c.begin(1000, 0));
+    assert(!c.supportsPwmFrequency());
+    size_t before = Wire.transactions;
+    c.set_pwm_frequency(KinisiPwmFrequency::KHZ_25); c.get_pwm_frequency();
+    assert(c.lastError().failure != KinisiFailure::NONE && Wire.transactions == before);
+    reset(99, 13); assert(c.begin(1000, 0));
+    assert(!c.supportsPwmFrequency() && !c.getPwmFrequencyOptions());
+    before = Wire.transactions;
+    c.set_pwm_frequency(static_cast<KinisiPwmFrequency>(12345));
+    assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == before);
+}
+
 int main() {
+    pwm_frequencies();
     current_limits();
     clear_faults();
     profiles(); sensor_reads_and_capacity(); gating_and_unknown_boards(); errors_and_lifecycle(); invalid_samples();
