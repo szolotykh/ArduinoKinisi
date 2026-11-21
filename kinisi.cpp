@@ -787,3 +787,21 @@ uint32_t KinisiController::set_pwm_frequency(KinisiPwmFrequency frequency_hz) {
     result = static_cast<uint32_t>(kinisi_codec::readUnsigned(response, 4));
     return result;
 }
+
+/** Encode SAVE_CONFIGURATION, match its reply, and decode the payload. */
+bool KinisiController::save_configuration() {
+    uint8_t payload[1] = {0};
+    return request(KINISI_SAVE_CONFIGURATION, payload, 0, nullptr, 0);
+}
+
+/** Encode GET_CONFIGURATION_FIELD, match its reply, and decode the payload. */
+double KinisiController::get_configuration_field(uint8_t field, uint8_t index) {
+    uint8_t payload[2] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(field), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(index), 1);
+    double result = {};
+    uint8_t response[8] = {0};
+    if (!request(KINISI_GET_CONFIGURATION_FIELD, payload, 2, response, 8)) return result;
+    result = kinisi_codec::readDouble(response);
+    return result;
+}

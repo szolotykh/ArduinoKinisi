@@ -50,6 +50,7 @@ public:
     /** Discrete hardware options, or nullptr for unknown/unsupported motors. */
     const KinisiPwmFrequencyOptions* getPwmFrequencyOptions() const;
     bool supportsPwmFrequency() const;
+    bool supportsConfigurationSave() const;
     const KinisiCurrentLimitOptions* getMotorCurrentLimitOptions(uint8_t index = 0) const;
     bool supportsMotorCurrentLimit(uint8_t index = 0) const;
     bool supportsMotorFaults(uint8_t index = 0) const;

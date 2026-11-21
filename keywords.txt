@@ -90,3 +90,5 @@ set_motor_current_limit	KEYWORD2
 subscribe_configured	KEYWORD2
 get_pwm_frequency	KEYWORD2
 set_pwm_frequency	KEYWORD2
+save_configuration	KEYWORD2
+get_configuration_field	KEYWORD2

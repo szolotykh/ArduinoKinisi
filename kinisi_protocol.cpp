@@ -151,6 +151,11 @@ bool KinisiProtocol::supportsSensor(KinisiSensor kind, uint8_t index) const {
 const KinisiPwmFrequencyOptions* KinisiProtocol::getPwmFrequencyOptions() const {
     return profile_known_ && profile_.pwm_frequency.frequency_count ? &profile_.pwm_frequency : nullptr;
 }
+bool KinisiProtocol::supportsConfigurationSave() const {
+    return ready_ && profile_known_ && identity_.board_model == 1 &&
+        identity_.board_major == 0 && identity_.board_minor == 4 && identity_.board_patch == 0 &&
+        identity_.protocol_major == 2 && identity_.protocol_minor >= 14;
+}
 bool KinisiProtocol::supportsPwmFrequency() const {
     return ready_ && identity_.protocol_major == 2 && identity_.protocol_minor >= 13 &&
         KINISI_WIRE_BUFFER_SIZE >= 8 && getPwmFrequencyOptions();
@@ -237,6 +242,8 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         case KINISI_GET_IMU: required_minor = 5; break;
         case KINISI_GET_MOTOR_CURRENT_LIMIT:
         case KINISI_SET_MOTOR_CURRENT_LIMIT: required_minor = 11; break;
+        case KINISI_SAVE_CONFIGURATION:
+        case KINISI_GET_CONFIGURATION_FIELD: required_minor = 14; break;
         case KINISI_GET_PWM_FREQUENCY:
         case KINISI_SET_PWM_FREQUENCY: required_minor = 13; break;
         case KINISI_CLEAR_MOTOR_FAULTS: required_minor = 10; break;
@@ -249,6 +256,9 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         default: break;
     }
     if (identity_.protocol_minor < required_minor)
+        return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+    if ((command == KINISI_SAVE_CONFIGURATION || command == KINISI_GET_CONFIGURATION_FIELD) &&
+        !supportsConfigurationSave())
         return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
     int subscription_slot = -1;
     if (command == KINISI_SUBSCRIBE || command == KINISI_SUBSCRIBE_WITH_MODE || command == KINISI_SUBSCRIBE_CONFIGURED || command == KINISI_UNSUBSCRIBE) {
