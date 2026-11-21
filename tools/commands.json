@@ -942,13 +942,13 @@
                     "name": "wheels_diameter",
                     "type": "double",
                     "default": 1,
-                    "description": "Diameter of the robot wheels in millimeters."
+                    "description": "Diameter of the robot wheels in meters."
                 },
                 {
                     "name": "robot_radius",
                     "type": "double",
                     "default": 1,
-                    "description": "Distance berween the center of the robot and the center of the wheels in millimeters."
+                    "description": "Distance from the robot center to each wheel center in meters."
                 },
                 {
                     "name": "encoder_resolution",
