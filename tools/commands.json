@@ -1101,6 +1101,7 @@
                 "INVALID_LENGTH",
                 "INVALID_ARGUMENT",
                 "INTERNAL_ERROR",
+                "ENCODER_NOT_INITIALIZED",
                 "PLATFORM_NOT_INITIALIZED",
                 "INIT_REQUIRED"
             ]
@@ -1180,6 +1181,7 @@
                 "INTERNAL_ERROR",
                 "INIT_REQUIRED",
                 "CLOCK_NOT_READY",
+                "ENCODER_NOT_INITIALIZED",
                 "PLATFORM_NOT_INITIALIZED"
             ]
         },

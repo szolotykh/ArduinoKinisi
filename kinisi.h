@@ -109,7 +109,7 @@ public:
     /** This command sets the velocity for the platform in PWM. Stops platform velocity and position control before applying PWM. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, PLATFORM_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
     bool set_platform_velocity(double x, double y, double t);
 
-    /** This command sets the controller for the platform. Firmware 2.3.1 uses direct P+I+D PWM output with saturation anti-windup; retune gains from earlier builds. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, PLATFORM_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
+    /** This command sets the controller for the platform. Firmware 2.3.1 uses direct P+I+D PWM output with saturation anti-windup; retune gains from earlier builds. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, ENCODER_NOT_INITIALIZED, PLATFORM_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
     bool start_platform_controller(double kp, double ki, double kd, double integral_limit = 100.0);
 
     /** This command set the target velocity for the platform in meters per second. Cancels platform position control; initialize it again before another pose target. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, PLATFORM_NOT_INITIALIZED, CONTROLLER_NOT_INITIALIZED, INIT_REQUIRED. Check lastError() after getters; setters return success. */
@@ -121,7 +121,7 @@ public:
     /** This command stops the controller for the platform. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR. Check lastError() after getters; setters return success. */
     bool stop_platform_controller();
 
-    /** This command starts the odometry calculation for the platform. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED, CLOCK_NOT_READY, PLATFORM_NOT_INITIALIZED. Check lastError() after getters; setters return success. */
+    /** This command starts the odometry calculation for the platform. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED, CLOCK_NOT_READY, ENCODER_NOT_INITIALIZED, PLATFORM_NOT_INITIALIZED. Check lastError() after getters; setters return success. */
     bool start_platform_odometry();
 
     /** This command resets the odometry calculation for the platform. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INTERNAL_ERROR, INIT_REQUIRED. Check lastError() after getters; setters return success. */
