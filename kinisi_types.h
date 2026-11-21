@@ -83,6 +83,8 @@ static const uint8_t KINISI_SET_MOTOR_CURRENT_LIMIT = 0x56;
 static const uint8_t KINISI_SUBSCRIBE_CONFIGURED = 0x84;
 static const uint8_t KINISI_GET_PWM_FREQUENCY = 0x57;
 static const uint8_t KINISI_SET_PWM_FREQUENCY = 0x58;
+static const uint8_t KINISI_SAVE_CONFIGURATION = 0x59;
+static const uint8_t KINISI_GET_CONFIGURATION_FIELD = 0x5A;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {

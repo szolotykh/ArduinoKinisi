@@ -352,7 +352,40 @@ static void pwm_frequencies() {
     assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == before);
 }
 
+static void configuration_save() {
+    KinisiController c;
+    for (uint8_t board = 1; board <= 5; ++board) {
+        reset(board, 14);
+        assert(c.begin(1000, 0));
+        assert(c.supportsConfigurationSave() == (board == 4));
+        const auto before = Wire.transactions;
+        assert(c.save_configuration() == (board == 4));
+        if (board != 4) {
+            assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND);
+            assert(Wire.transactions == before);
+        }
+    }
+    reset(4, 13);
+    assert(c.begin(1000, 0));
+    assert(!c.supportsConfigurationSave() && !c.save_configuration());
+    reset(4, 14);
+    assert(c.begin(1000, 0));
+    Wire.responder = [](const std::vector<uint8_t>& r) {
+        const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+        if (r[1] == KINISI_SAVE_CONFIGURATION) {
+            assert(r.size() == 4);
+            Wire.responses.push_back(frame(KINISI_ERROR, id, {r[1], uint8_t(KinisiErrorCode::INTERNAL_ERROR)}));
+        } else {
+            assert(r[1] == KINISI_GET_CONFIGURATION_FIELD && r.size() == 6 && r[4] == 4 && r[5] == 1);
+            Wire.responses.push_back(frame(r[1], id, {0, 0, 0, 0, 0, 0, 0x90, 0x40}));
+        }
+    };
+    assert(!c.save_configuration());
+    assert(c.get_configuration_field(4, 1) == 1024.0);
+}
+
 int main() {
+    configuration_save();
     pwm_frequencies();
     current_limits();
     clear_faults();
