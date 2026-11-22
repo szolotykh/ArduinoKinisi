@@ -51,6 +51,8 @@ public:
     const KinisiPwmFrequencyOptions* getPwmFrequencyOptions() const;
     bool supportsPwmFrequency() const;
     bool supportsConfigurationSave() const;
+    /** Board-wide driver sleep requires READY, a known profile and protocol 2.15+. */
+    bool supportsDriverSleep() const;
     const KinisiCurrentLimitOptions* getMotorCurrentLimitOptions(uint8_t index = 0) const;
     bool supportsMotorCurrentLimit(uint8_t index = 0) const;
     bool supportsMotorFaults(uint8_t index = 0) const;

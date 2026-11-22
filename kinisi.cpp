@@ -805,3 +805,20 @@ double KinisiController::get_configuration_field(uint8_t field, uint8_t index) {
     result = kinisi_codec::readDouble(response);
     return result;
 }
+
+/** Encode SET_DRIVER_SLEEP, match its reply, and decode the payload. */
+bool KinisiController::set_driver_sleep(uint8_t sleeping) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(sleeping), 1);
+    return request(KINISI_SET_DRIVER_SLEEP, payload, 1, nullptr, 0);
+}
+
+/** Encode GET_DRIVER_SLEEP, match its reply, and decode the payload. */
+uint8_t KinisiController::get_driver_sleep() {
+    uint8_t payload[1] = {0};
+    uint8_t result = {};
+    uint8_t response[1] = {0};
+    if (!request(KINISI_GET_DRIVER_SLEEP, payload, 0, response, 1)) return result;
+    result = static_cast<uint8_t>(kinisi_codec::readUnsigned(response, 1));
+    return result;
+}

@@ -12,6 +12,7 @@ INTERNAL = {'INIT', 'TIME_SYNC_RESPONSE'}
 HEADER = '// Generated from tools/commands.json; edit the schema or generator instead.\n'
 # Keep dependencies of the handwritten session while allowing new schema commands.
 SESSION_COMMANDS = {'PING', 'SET_HEARTBEAT_CONFIG', 'SUBSCRIBE_ODOMETRY',
+                    'SET_DRIVER_SLEEP', 'GET_DRIVER_SLEEP',
                     'SAVE_CONFIGURATION', 'GET_CONFIGURATION_FIELD',
                     'UNSUBSCRIBE_ODOMETRY', 'ENCODER_ODOMETRY_EVENT',
                     'PLATFORM_ODOMETRY_EVENT', 'POLL_TELEMETRY', 'GET_TEMPERATURE', 'GET_IMU',
@@ -195,6 +196,7 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
     keywords += 'poll\tKEYWORD2\ngetSubscribedEncoderOdometry\tKEYWORD2\ngetSubscribedPlatformOdometry\tKEYWORD2\n'
     keywords += 'boardProfile\tKEYWORD2\nsupportsSensor\tKEYWORD2\nKinisiSensor\tKEYWORD1\nKinisiBoardProfile\tKEYWORD1\n'
     keywords += 'supportsMotorCurrent\tKEYWORD2\nsupportsMotorFaults\tKEYWORD2\n'
+    keywords += 'supportsDriverSleep\tKEYWORD2\n'
     if topics:
         keywords += 'KinisiSubscriptionMode\tKEYWORD1\nKinisiTopic\tKEYWORD1\nKinisiTelemetrySample\tKEYWORD1\nsupportsTopic\tKEYWORD2\ngetSubscriptionSample\tKEYWORD2\n'
     if schema.get('subscription_triggers'):
