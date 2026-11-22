@@ -304,8 +304,8 @@ struct imu_tracking_status {
     uint8_t flags; ///< ImuTrackingFlag bitmask.
     uint8_t reserved; ///< Reserved; must be zero.
     uint32_t sequence; ///< Snapshot sequence; match vector reads.
-    uint64_t timestamp_us; ///< Monotonic joint accel/gyro sample watermark in board microseconds.
-    uint32_t elapsed_us; ///< Elapsed tracking time from the calibrated relative origin, in microseconds.
+    uint64_t timestamp_us; ///< Last eligible monotonic joint accel/gyro source watermark; no published watermark reaches origin + window_us. Zero before the first estimate.
+    uint32_t elapsed_us; ///< Wall elapsed microseconds since the source origin, capped at window_us; distinct from the retained source watermark. Frozen on fault or expiry; STOP clears it.
     uint32_t accel_age_us; ///< Accel age in microseconds; UINT32_MAX if unavailable.
     uint32_t gyro_age_us; ///< Gyro age in microseconds; UINT32_MAX if unavailable.
 };
@@ -321,7 +321,7 @@ struct imu_tracking_vector {
 /** Volatile IMU-only relative tracking diagnostics. */
 struct imu_tracking_configuration {
     double mounting_yaw_rad; ///< Declared supported mounting yaw in radians.
-    uint32_t window_us; ///< Actual configured maximum relative tracking duration in microseconds.
+    uint32_t window_us; ///< Actual source tracking horizon in microseconds; 1000000 for this v0.4 release. Eligible source times are [origin, origin + window_us).
 };
 enum class KinisiSubscriptionTrigger : uint8_t {
     PERIODIC = 0,
