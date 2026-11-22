@@ -53,7 +53,7 @@ public:
     bool supportsConfigurationSave() const;
     /** Require READY and an exact profile: v0.3/Nano protocol 2.17+, v0.4 protocol 2.15+. */
     bool supportsDriverSleep() const;
-    /** Board idle requires READY, a known profile and protocol 2.16+. */
+    /** Require READY and an exact idle-capable profile: v0.3/Nano 2.18+, v0.4 2.16+. */
     bool supportsBoardIdle() const;
     const KinisiCurrentLimitOptions* getMotorCurrentLimitOptions(uint8_t index = 0) const;
     bool supportsMotorCurrentLimit(uint8_t index = 0) const;

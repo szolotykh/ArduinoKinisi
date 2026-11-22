@@ -68,14 +68,14 @@ static void profiles() {
         assert(profile.hasSensor(KinisiSensor::TEMPERATURE) == (i == 4));
         assert(profile.hasSensor(KinisiSensor::IMU) == (i == 4));
         assert(profile.power.driver_sleep == (i >= 3));
-        assert(profile.power.board_idle == (i == 4));
+        assert(profile.power.board_idle == (i >= 3));
         assert(!profile.hasSensor(KinisiSensor::IMU, 1));
         assert(!profile.hasSensor(static_cast<KinisiSensor>(255)));
     }
     assert(profile.imu[0].accelerometer && profile.imu[0].gyroscope);
     assert(kinisiLookupBoardProfile(1, 0, 3, 1, profile));
     assert(profile.patch == 1 && profile.resources.motors == 4 && profile.resources.encoders == 4);
-    assert(profile.power.driver_sleep && !profile.power.board_idle);
+    assert(profile.power.driver_sleep && profile.power.board_idle);
     assert(!kinisiLookupBoardProfile(1, 0, 3, 2, profile));
     assert(!kinisiLookupBoardProfile(1, 0, 4, 1, profile));
     assert(profile.model == 0 && profile.resources.motors == 0);
@@ -429,7 +429,7 @@ static void legacy_driver_sleep() {
             assert(c.get_driver_sleep() == requested && c.lastError().failure == KinisiFailure::NONE);
         }
         assert(Wire.transactions == before + 8); // No implicit initialization or motion.
-        if (item.minor == 3) assert(!c.supportsBoardIdle());
+        if (item.minor == 3 && item.protocol < 18) assert(!c.supportsBoardIdle());
         Wire.responder = [](const std::vector<uint8_t>& r) {
             Wire.responses.push_back(frame(KINISI_ERROR, r[2] | uint16_t(r[3]) << 8,
                 {r[1], uint8_t(KinisiErrorCode::DRIVERS_ASLEEP)}));
@@ -511,7 +511,7 @@ static void driver_sleep() {
     assert(c.get_driver_sleep() == 1 && c.lastError().failure == KinisiFailure::NONE);
 }
 
-static void board_idle() {
+static void board_idle(uint8_t idle_revision = 4, uint8_t idle_patch = 0, uint8_t idle_protocol = 16) {
     reset(4, 16);
     KinisiController c;
     assert(!c.supportsBoardIdle());
@@ -535,7 +535,17 @@ static void board_idle() {
     before = Wire.transactions;
     assert(!c.supportsBoardIdle() && !c.set_board_idle(1)); c.get_board_idle();
     assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
-    reset(4, 16); assert(c.begin(1000, 0));
+    struct IdleGate { uint8_t minor, patch, protocol; };
+    for (const IdleGate& gate : {IdleGate{3, 0, 17}, IdleGate{3, 1, 17},
+            IdleGate{3, 2, 18}, IdleGate{4, 1, 18}, IdleGate{1, 0, 18}, IdleGate{2, 0, 18}}) {
+        reset(gate.minor, gate.protocol, gate.patch); assert(c.begin(1000, 0));
+        before = Wire.transactions;
+        assert(!c.supportsBoardIdle() && !c.set_board_idle(1)); c.get_board_idle();
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+        if (gate.minor == 3 && gate.patch <= 1) assert(c.supportsDriverSleep());
+    }
+    reset(idle_revision, idle_protocol, idle_patch); assert(c.begin(1000, 0));
+    assert(c.supportsBoardIdle());
     uint8_t sleeping = 0;
     bool wake_failure = false;
     auto sleep_response = [&](const std::vector<uint8_t>& r) {
@@ -573,7 +583,7 @@ static void board_idle() {
     c.get_board_idle();
     assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
     sleeping = 1;
-    reset(4, 16);
+    reset(idle_revision, idle_protocol, idle_patch);
     Wire.responder = [&](const std::vector<uint8_t>& r) {
         assert(r[1] != KINISI_SET_BOARD_IDLE);  // Reconnect never wakes the board.
         if (r[1] == KINISI_GET_BOARD_IDLE) sleep_response(r);
@@ -586,6 +596,9 @@ static void board_idle() {
 int main() {
     legacy_driver_sleep();
     board_idle();
+    board_idle(3, 0, 18);
+    board_idle(3, 1, 18);
+    board_idle(3, 1, 19);
     driver_sleep();
     configuration_save();
     pwm_frequencies();

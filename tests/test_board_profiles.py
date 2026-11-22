@@ -67,7 +67,7 @@ class ProfileTests(unittest.TestCase):
 
     def test_older_power_profiles_remain_valid(self):
         for profile in self.bundle['boards']:
-            self.assertEqual(profile['power']['board_idle'], profile['board']['revision'] == '0.4.0')
+            self.assertEqual(profile['power']['board_idle'], profile['board']['revision'] in ('0.3.0', '0.3.1', '0.4.0'))
             profile['power'].pop('board_idle')
         generated = profiles.generate(self.bundle)
         self.assertIn('{true, false}', generated['kinisi_board_profiles.cpp'])

@@ -165,8 +165,12 @@ bool KinisiProtocol::supportsDriverSleep() const {
     return identity_.board_minor == 4 && identity_.board_patch == 0 && identity_.protocol_minor >= 15;
 }
 bool KinisiProtocol::supportsBoardIdle() const {
-    return ready_ && profile_known_ && profile_.power.board_idle &&
-        identity_.protocol_major == 2 && identity_.protocol_minor >= 16;
+    if (!ready_ || !profile_known_ || !profile_.power.board_idle ||
+        identity_.protocol_major != 2 || identity_.board_model != 1 || identity_.board_major != 0)
+        return false;
+    if (identity_.board_minor == 3 && identity_.board_patch <= 1)
+        return identity_.protocol_minor >= 18;
+    return identity_.board_minor == 4 && identity_.board_patch == 0 && identity_.protocol_minor >= 16;
 }
 bool KinisiProtocol::supportsPwmFrequency() const {
     return ready_ && identity_.protocol_major == 2 && identity_.protocol_minor >= 13 &&
