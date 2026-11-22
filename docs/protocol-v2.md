@@ -283,9 +283,11 @@ across the next restart.
 
 ## Motor-driver sleep
 
-`supportsDriverSleep()` requires a READY session, protocol 2.15 or later in
-major version 2, and a known board profile with `power.driver_sleep` enabled
-(currently v0.4.0). Both sleep commands reject unsupported sessions before I/O.
+`supportsDriverSleep()` requires READY, protocol major version 2, and an exact
+known board profile with `power.driver_sleep` enabled. Original v0.3.0 and Nano
+(hardware v0.3.1) require protocol 2.17 or later; v0.4.0 requires 2.15 or later.
+Both commands reject unsupported sessions before I/O, including unknown patch
+revisions. Nano's product name does not change its wire identity: model 1, 0.3.1.
 
 ```cpp
 if (controller.supportsDriverSleep()) {
@@ -295,14 +297,14 @@ if (controller.supportsDriverSleep()) {
             Serial.println(sleeping);
         }
     }
-    bool awake = controller.set_driver_sleep(0);  // Wait for verified ACK.
-    if (!awake) { /* Inspect controller.lastError() before retrying. */ }
+    bool released = controller.set_driver_sleep(0);  // Wait for release ACK.
+    if (!released) { /* Inspect controller.lastError() before retrying. */ }
 }
 ```
 
 The setter accepts uint8_t values 0 or 1 and returns false on failure. The
 getter returns 0 or 1, and also returns zero on failure: always check
-`lastError()` before treating zero as an awake result. Requests and responses
+`lastError()` before treating zero as a released inhibit. Requests and responses
 fit the default 32-byte Wire buffer.
 
 Sleep stops and coasts all motors, cancels active control, and inhibits new
@@ -312,6 +314,20 @@ individual motor is initialized. Wake leaves outputs stopped. Initialize or
 start closed-loop control again before issuing new targets. Prohibited
 operations report `KinisiErrorCode::DRIVERS_ASLEEP` (19) in `lastError()`.
 A failed wake leaves the inhibit set; correct the cause and explicitly retry.
+A stale wake superseded by a newer sleep reports `DRIVERS_ASLEEP`; read the
+current inhibit and explicitly retry only if release is still wanted.
+
+On v0.3/Nano, sleep holds both DRV8870 inputs low. Releasing the software
+inhibit keeps those inputs low until a fresh nonzero drive request or deliberate
+brake, so a zero readback does not establish that the chips are physically awake.
+After confirmed inhibit release, a fresh `brake_motor()` or `brake_platform()`
+request is valid without a preceding drive request, subject to the command's
+normal initialization requirements. Ordinary short brake drives both inputs
+high; stop/coast leaves both low. Brake requests made while inhibited, or stale
+requests from before the inhibit transition, are rejected.
+These boards have no SPI wake verification, current telemetry, fault readback,
+or board-idle support.
+On v0.4, wake verifies retained settings for initialized drivers.
 
 Sleep is volatile and is not saved to FRAM. Reconnecting preserves its current
 state and sends no automatic sleep or wake command. Reset clears the inhibit

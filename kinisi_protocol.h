@@ -51,7 +51,7 @@ public:
     const KinisiPwmFrequencyOptions* getPwmFrequencyOptions() const;
     bool supportsPwmFrequency() const;
     bool supportsConfigurationSave() const;
-    /** Board-wide driver sleep requires READY, a known profile and protocol 2.15+. */
+    /** Require READY and an exact profile: v0.3/Nano protocol 2.17+, v0.4 protocol 2.15+. */
     bool supportsDriverSleep() const;
     /** Board idle requires READY, a known profile and protocol 2.16+. */
     bool supportsBoardIdle() const;

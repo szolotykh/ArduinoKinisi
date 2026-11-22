@@ -67,12 +67,16 @@ static void profiles() {
         }
         assert(profile.hasSensor(KinisiSensor::TEMPERATURE) == (i == 4));
         assert(profile.hasSensor(KinisiSensor::IMU) == (i == 4));
-        assert(profile.power.driver_sleep == (i == 4));
+        assert(profile.power.driver_sleep == (i >= 3));
         assert(profile.power.board_idle == (i == 4));
         assert(!profile.hasSensor(KinisiSensor::IMU, 1));
         assert(!profile.hasSensor(static_cast<KinisiSensor>(255)));
     }
     assert(profile.imu[0].accelerometer && profile.imu[0].gyroscope);
+    assert(kinisiLookupBoardProfile(1, 0, 3, 1, profile));
+    assert(profile.patch == 1 && profile.resources.motors == 4 && profile.resources.encoders == 4);
+    assert(profile.power.driver_sleep && !profile.power.board_idle);
+    assert(!kinisiLookupBoardProfile(1, 0, 3, 2, profile));
     assert(!kinisiLookupBoardProfile(1, 0, 4, 1, profile));
     assert(profile.model == 0 && profile.resources.motors == 0);
     assert(!kinisiLookupBoardProfile(2, 0, 4, 0, profile));
@@ -394,6 +398,47 @@ static void configuration_save() {
     assert(c.get_configuration_field(4, 1) == 1024.0);
 }
 
+static void legacy_driver_sleep() {
+    struct Case { uint8_t minor, patch, protocol; bool supported; };
+    const Case cases[] = {{3, 0, 16, false}, {3, 1, 15, false}, {3, 1, 16, false},
+        {3, 0, 17, true}, {3, 1, 17, true}, {3, 1, 18, true}, {3, 2, 17, false},
+        {4, 1, 17, false}, {99, 0, 17, false}, {1, 0, 17, false}, {2, 0, 17, false}, {4, 0, 15, true}};
+    for (const auto& item : cases) {
+        reset(item.minor, item.protocol, item.patch);
+        KinisiController c; assert(c.begin(1000, 0));
+        assert(c.supportsDriverSleep() == item.supported);
+        const auto before = Wire.transactions;
+        if (!item.supported) {
+            assert(!c.set_driver_sleep(1)); c.get_driver_sleep();
+            assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+            continue;
+        }
+        uint8_t sleeping = 0;
+        Wire.responder = [&](const std::vector<uint8_t>& r) {
+            const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+            if (r[1] == KINISI_SET_DRIVER_SLEEP) {
+                assert(r.size() == 5 && r[4] <= 1);
+                sleeping = r[4]; Wire.responses.push_back(frame(r[1], id));
+            } else {
+                assert(r[1] == KINISI_GET_DRIVER_SLEEP && r.size() == 4);
+                Wire.responses.push_back(frame(r[1], id, {sleeping}));
+            }
+        };
+        for (uint8_t requested : {1, 1, 0, 0}) {
+            assert(c.set_driver_sleep(requested));
+            assert(c.get_driver_sleep() == requested && c.lastError().failure == KinisiFailure::NONE);
+        }
+        assert(Wire.transactions == before + 8); // No implicit initialization or motion.
+        if (item.minor == 3) assert(!c.supportsBoardIdle());
+        Wire.responder = [](const std::vector<uint8_t>& r) {
+            Wire.responses.push_back(frame(KINISI_ERROR, r[2] | uint16_t(r[3]) << 8,
+                {r[1], uint8_t(KinisiErrorCode::DRIVERS_ASLEEP)}));
+        };
+        assert(!c.set_driver_sleep(0));
+        assert(c.lastError().code == KinisiErrorCode::DRIVERS_ASLEEP && c.ready());
+    }
+}
+
 static void driver_sleep() {
     reset(4, 15);
     KinisiController c;
@@ -539,6 +584,7 @@ static void board_idle() {
 }
 
 int main() {
+    legacy_driver_sleep();
     board_idle();
     driver_sleep();
     configuration_save();

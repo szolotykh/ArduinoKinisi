@@ -157,8 +157,12 @@ bool KinisiProtocol::supportsConfigurationSave() const {
         identity_.protocol_major == 2 && identity_.protocol_minor >= 14;
 }
 bool KinisiProtocol::supportsDriverSleep() const {
-    return ready_ && profile_known_ && profile_.power.driver_sleep &&
-        identity_.protocol_major == 2 && identity_.protocol_minor >= 15;
+    if (!ready_ || !profile_known_ || !profile_.power.driver_sleep ||
+            identity_.protocol_major != 2 || identity_.board_model != 1 || identity_.board_major != 0)
+        return false;
+    if (identity_.board_minor == 3 && identity_.board_patch <= 1)
+        return identity_.protocol_minor >= 17;
+    return identity_.board_minor == 4 && identity_.board_patch == 0 && identity_.protocol_minor >= 15;
 }
 bool KinisiProtocol::supportsBoardIdle() const {
     return ready_ && profile_known_ && profile_.power.board_idle &&
