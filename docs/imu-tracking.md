@@ -1,0 +1,81 @@
+# IMU-only relative tracking
+
+Protocol 2.20 adds a volatile relative tracking experiment on exact model 1,
+hardware 0.4.0 with `capabilities.imu_tracking: true`. The SDK requires READY
+and a compatible protocol before I/O. Older boards and unknown revisions remain
+unsupported; their existing commands continue to work.
+
+This estimator does not require encoders, platform initialization or fusion.
+It never sends motion targets, starts motor controllers, or selects feedback for
+control. It is not absolute localization, and accuracy is not physically qualified.
+The bounded horizon is provisional: read `GET_IMU_TRACKING_CONFIGURATION.window_us`
+for the actual configured limit rather than assuming a fixed duration.
+
+## Deliberate stationary origin
+
+Use a rigid, level mount with **sensor +Z up** and the IMU centered at the chassis
+reference point. Chassis axes are forward, left, up. Declare `mounting_yaw_rad`
+as the angle of **sensor +X**, counterclockwise about chassis +Z, in [-pi, pi].
+The transform is `Rz(yaw) * (sensor_x, sensor_y, sensor_z)`. This declaration uses
+sensor axes, not the board outline or the fusion experiment's board-axis angle.
+A backwards sensor requires pi radians. Tilt and lever-arm compensation are unsupported.
+
+`SET_IMU_TRACKING(action, stationary_mount_confirmed, mounting_yaw_rad)` supports:
+
+- START (0), RESET (2), RECALIBRATE (3): each performs full cold calibration and
+  re-anchors the relative origin from any state. All discard prior bias and pose,
+  require confirmation exactly 1 and finite yaw, and require the installation to
+  remain at true zero velocity during calibration.
+- STOP (1): requires confirmation 0 and yaw 0; ends integration without commanding
+  motors. Read state after the ACK.
+
+An ACK confirms the action, not a valid estimate. IMU stationarity checks cannot
+distinguish true rest from constant velocity. Caller confirmation is a deliberate
+attestation of rest and the supported mounting, not a measured guarantee.
+Faults, interruptions and expiry require an explicit restart; reconnect and reads
+never start or re-anchor tracking. Nothing is persisted by SAVE_CONFIGURATION.
+
+## Diagnostics and freshness
+
+Status contains state, fault, flags, sequence, monotonic joint sample-watermark
+`timestamp_us`, tracking `elapsed_us`, and separate accel/gyro ages. UINT32_MAX
+means an unavailable age. A vector read returns its sequence plus x/y/z:
+
+- POSE: relative x/y metres and yaw radians.
+- TWIST: body-frame vx/vy metres per second and yaw rate radians per second.
+- BIAS: accel-X/accel-Y metres per second squared and gyro-Z radians per second.
+
+Only combine status and vector reads with equal sequences. Different sequences
+are different snapshots; refresh explicitly rather than inventing a common time.
+Require TRACKING and ESTIMATE_VALID for a usable current estimate; software health
+is not an accuracy guarantee. Unavailable vectors return SAMPLE_NOT_AVAILABLE.
+Status reads may enforce tracking expiry. Cached snapshots continue to age even
+when polling is off and must not be presented as live tracking.
+
+Status and vector responses each contain 28 payload bytes plus the four-byte
+envelope, fitting the default Arduino Wire32 buffer. Configuration is 12 payload
+bytes. Requests and responses are packed little endian; timestamps are uint64.
+
+## Arduino
+
+```cpp
+if (controller.supportsImuTracking()) {
+    // Only after verifying true rest and the supported mounting.
+    if (controller.set_imu_tracking(KinisiImuTrackingAction::START, 1, 0.0)) {
+        imu_tracking_status status = controller.get_imu_tracking_status();
+        if (controller.lastError().failure == KinisiFailure::NONE &&
+            status.state == static_cast<uint8_t>(KinisiImuTrackingState::TRACKING) &&
+            (status.flags & static_cast<uint8_t>(KinisiImuTrackingFlag::ESTIMATE_VALID))) {
+            imu_tracking_vector pose = controller.get_imu_tracking_vector(KinisiImuTrackingVectorKind::POSE);
+            if (controller.lastError().failure == KinisiFailure::NONE && pose.sequence == status.sequence) {
+                // Interpret matching snapshots using their status and timestamp.
+            }
+        }
+    }
+}
+```
+
+Check lastError after every getter and boolean results after actions. AVR's
+binary32 native double limits numeric precision; timestamps remain uint64. Native
+plus/minus PI yaw endpoints encode exact binary64 pi on the wire. The appended
+imu_tracking capability preserves previous aggregate initializers.

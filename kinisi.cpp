@@ -890,3 +890,55 @@ fusion_configuration KinisiController::get_fusion_configuration() {
     result.mounting_yaw_rad = kinisi_codec::readDouble(response + 1);
     return result;
 }
+
+/** Encode SET_IMU_TRACKING, match its reply, and decode the payload. */
+bool KinisiController::set_imu_tracking(uint8_t action, uint8_t stationary_mount_confirmed, double mounting_yaw_rad) {
+    uint8_t payload[10] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(action), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(stationary_mount_confirmed), 1);
+    kinisi_codec::writeFusionYaw(payload + 2, mounting_yaw_rad);
+    return request(KINISI_SET_IMU_TRACKING, payload, 10, nullptr, 0);
+}
+
+/** Encode GET_IMU_TRACKING_STATUS, match its reply, and decode the payload. */
+imu_tracking_status KinisiController::get_imu_tracking_status() {
+    uint8_t payload[1] = {0};
+    imu_tracking_status result = {};
+    uint8_t response[28] = {0};
+    if (!request(KINISI_GET_IMU_TRACKING_STATUS, payload, 0, response, 28)) return result;
+    result.state = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.fault = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 1, 1));
+    result.flags = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 2, 1));
+    result.reserved = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 3, 1));
+    result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 4, 4));
+    result.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(response + 8, 8));
+    result.elapsed_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 16, 4));
+    result.accel_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 20, 4));
+    result.gyro_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 24, 4));
+    return result;
+}
+
+/** Encode GET_IMU_TRACKING_VECTOR, match its reply, and decode the payload. */
+imu_tracking_vector KinisiController::get_imu_tracking_vector(uint8_t kind) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(kind), 1);
+    imu_tracking_vector result = {};
+    uint8_t response[28] = {0};
+    if (!request(KINISI_GET_IMU_TRACKING_VECTOR, payload, 1, response, 28)) return result;
+    result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 0, 4));
+    result.x = kinisi_codec::readDouble(response + 4);
+    result.y = kinisi_codec::readDouble(response + 12);
+    result.z = kinisi_codec::readDouble(response + 20);
+    return result;
+}
+
+/** Encode GET_IMU_TRACKING_CONFIGURATION, match its reply, and decode the payload. */
+imu_tracking_configuration KinisiController::get_imu_tracking_configuration() {
+    uint8_t payload[1] = {0};
+    imu_tracking_configuration result = {};
+    uint8_t response[12] = {0};
+    if (!request(KINISI_GET_IMU_TRACKING_CONFIGURATION, payload, 0, response, 12)) return result;
+    result.mounting_yaw_rad = kinisi_codec::readDouble(response + 0);
+    result.window_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 8, 4));
+    return result;
+}

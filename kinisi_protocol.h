@@ -57,6 +57,7 @@ public:
     bool supportsBoardIdle() const;
     /** Exact v0.4.0 experiment capability and READY protocol 2.19+. */
     bool supportsFusionExperiment() const;
+    bool supportsImuTracking() const;
     const KinisiCurrentLimitOptions* getMotorCurrentLimitOptions(uint8_t index = 0) const;
     bool supportsMotorCurrentLimit(uint8_t index = 0) const;
     bool supportsMotorFaults(uint8_t index = 0) const;

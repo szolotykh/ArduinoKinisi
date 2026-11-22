@@ -102,3 +102,7 @@ set_fusion_experiment	KEYWORD2
 get_fusion_status	KEYWORD2
 get_fusion_vector	KEYWORD2
 get_fusion_configuration	KEYWORD2
+set_imu_tracking	KEYWORD2
+get_imu_tracking_status	KEYWORD2
+get_imu_tracking_vector	KEYWORD2
+get_imu_tracking_configuration	KEYWORD2

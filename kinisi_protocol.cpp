@@ -170,6 +170,13 @@ bool KinisiProtocol::supportsFusionExperiment() const {
         identity_.board_minor == 4 && identity_.board_patch == 0 &&
         identity_.protocol_major == 2 && identity_.protocol_minor >= 19;
 }
+
+bool KinisiProtocol::supportsImuTracking() const {
+    return ready_ && profile_known_ && profile_.capabilities.imu_tracking &&
+        identity_.board_model == 1 && identity_.board_major == 0 &&
+        identity_.board_minor == 4 && identity_.board_patch == 0 &&
+        identity_.protocol_major == 2 && identity_.protocol_minor >= 20;
+}
 bool KinisiProtocol::supportsBoardIdle() const {
     if (!ready_ || !profile_known_ || !profile_.power.board_idle ||
         identity_.protocol_major != 2 || identity_.board_model != 1 || identity_.board_major != 0)
@@ -296,6 +303,19 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         if (command == KINISI_SET_BOARD_IDLE && (length != 1 || payload[0] > 1))
             return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
     }
+    if (command >= KINISI_SET_IMU_TRACKING && command <= KINISI_GET_IMU_TRACKING_CONFIGURATION) {
+        if (!supportsImuTracking()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+        if (command == KINISI_SET_IMU_TRACKING) {
+            if (length != 10 || payload[0] > 3 || payload[1] > 1)
+                return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+            const double yaw = kinisi_codec::readDouble(payload + 2);
+            if (!isfinite(yaw) || fabs(yaw) > 3.141592653589793 ||
+                (payload[0] == 1 ? payload[1] != 0 || yaw != 0 : payload[1] != 1))
+                return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+        }
+        if (command == KINISI_GET_IMU_TRACKING_VECTOR && (length != 1 || payload[0] > 2))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    }
     const bool fusion = command >= KINISI_SET_FUSION_EXPERIMENT && command <= KINISI_GET_FUSION_CONFIGURATION;
     if (fusion) {
         if (!supportsFusionExperiment()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
@@ -385,6 +405,19 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     uint32_t started = millis();
     if (!send(command, id, payload, length, response_length) ||
         !receive(command, command, id, response, response_length, started)) return false;
+    if (command == KINISI_GET_IMU_TRACKING_STATUS &&
+        (response[0] > 4 || response[1] > 9 || response[2] > 15 || response[3] != 0))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (command == KINISI_GET_IMU_TRACKING_VECTOR) {
+        for (uint8_t offset = 4; offset < 28; offset += 8)
+            if (!isfinite(kinisi_codec::readDouble(response + offset))) return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    }
+    if (command == KINISI_GET_IMU_TRACKING_CONFIGURATION) {
+        // Check the binary64 wire value before AVR rounds it to its native double.
+        const uint64_t magnitude = kinisi_codec::readUnsigned(response, 8) & UINT64_C(0x7fffffffffffffff);
+        if (magnitude > UINT64_C(0x400921fb54442d18) || !kinisi_codec::readUnsigned(response + 8, 4))
+            return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    }
     if (command == KINISI_GET_FUSION_STATUS && (response[0] > 2 || response[1] > 3 || response[2] > 9 || response[3] > 15))
         return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
     if (command == KINISI_GET_FUSION_VECTOR) {

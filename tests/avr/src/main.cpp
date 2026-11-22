@@ -82,6 +82,15 @@ void setup() {
         if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(amps);
         controller.subscribe(KinisiTopic::MOTOR_CURRENT, 0, 100);
     }
+    if (controller.supportsImuTracking()) {
+        imu_tracking_status status = controller.get_imu_tracking_status();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(status.elapsed_us);
+        imu_tracking_vector pose = controller.get_imu_tracking_vector(KinisiImuTrackingVectorKind::POSE);
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(pose.x);
+        imu_tracking_configuration configuration = controller.get_imu_tracking_configuration();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(configuration.window_us);
+        controller.set_imu_tracking(KinisiImuTrackingAction::STOP, 0, 0);
+    }
     if (controller.supportsFusionExperiment()) {
         fusion_configuration configuration = controller.get_fusion_configuration();
         if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(configuration.mode);

@@ -679,7 +679,70 @@ static void fusion_experiment() {
     }
 }
 
+static void imu_tracking() {
+    for (uint8_t version : {uint8_t(19), uint8_t(20), uint8_t(21)}) {
+        reset(4, version); KinisiController c;
+        assert(!c.supportsImuTracking()); assert(c.begin(1000, 0));
+        assert(c.supportsImuTracking() == (version >= 20));
+        auto before = Wire.transactions;
+        if (version < 20) {
+            assert(!c.set_imu_tracking(0,1,0)); c.get_imu_tracking_status(); c.get_imu_tracking_vector(0); c.get_imu_tracking_configuration();
+            assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before); continue;
+        }
+        bool reject = false, malformed = false;
+        Wire.responder = [&](const std::vector<uint8_t>& r) {
+            uint16_t id=r[2] | uint16_t(r[3])<<8; std::vector<uint8_t> data;
+            if (reject) { Wire.responses.push_back(frame(KINISI_ERROR,id,{r[1],uint8_t(KinisiErrorCode::INVALID_ARGUMENT)})); return; }
+            if (r[1]==KINISI_SET_IMU_TRACKING) {
+                assert(r.size()==14 && r[4]<=3);
+                assert(r[4]==1 ? r[5]==0 && kinisi_codec::readDouble(r.data()+6)==0 : r[5]==1 && kinisi_codec::readDouble(r.data()+6)==3.141592653589793);
+            } else if (r[1]==KINISI_GET_IMU_TRACKING_STATUS) {
+                data.resize(28); data[0]=malformed?5:2; data[2]=3;
+                kinisi_codec::writeUnsigned(data.data()+4,42,4); kinisi_codec::writeUnsigned(data.data()+8,(UINT64_C(1)<<60)+7,8);
+                kinisi_codec::writeUnsigned(data.data()+16,500,4); kinisi_codec::writeUnsigned(data.data()+20,10,4); kinisi_codec::writeUnsigned(data.data()+24,20,4);
+            } else if (r[1]==KINISI_GET_IMU_TRACKING_VECTOR) {
+                data.resize(28); kinisi_codec::writeUnsigned(data.data(),42,4); kinisi_codec::writeDouble(data.data()+4,1.25);
+            } else if (r[1]==KINISI_GET_IMU_TRACKING_CONFIGURATION) {
+                data.resize(12); kinisi_codec::writeDouble(data.data(),3.141592653589793); kinisi_codec::writeUnsigned(data.data()+8,5000000,4);
+            } else assert(false);
+            assert(data.size()+4<=32); Wire.responses.push_back(frame(r[1],id,data));
+        };
+        for (auto action : {KinisiImuTrackingAction::START,KinisiImuTrackingAction::RESET,KinisiImuTrackingAction::RECALIBRATE})
+            assert(c.set_imu_tracking(action,1,3.141592653589793));
+        assert(c.set_imu_tracking(KinisiImuTrackingAction::STOP,0,0));
+        auto status=c.get_imu_tracking_status(); assert(status.timestamp_us==(UINT64_C(1)<<60)+7 && status.elapsed_us==500 && status.accel_age_us==10 && status.gyro_age_us==20);
+        assert(c.get_imu_tracking_vector(KinisiImuTrackingVectorKind::POSE).x==1.25);
+        assert(c.get_imu_tracking_configuration().window_us==5000000);
+        before=Wire.transactions;
+        assert(!c.set_imu_tracking(0,0,0)); assert(!c.set_imu_tracking(1,1,0)); assert(!c.set_imu_tracking(1,0,1)); assert(!c.set_imu_tracking(4,1,0));
+        assert(!c.set_imu_tracking(0,1,INFINITY)); assert(!c.set_imu_tracking(0,1,NAN)); assert(!c.set_imu_tracking(0,1,4));
+        c.get_imu_tracking_vector(3); assert(c.lastError().failure==KinisiFailure::INVALID_ARGUMENT && Wire.transactions==before);
+        reject=true; assert(!c.set_imu_tracking(0,1,0)); assert(c.ready() && c.lastError().code==KinisiErrorCode::INVALID_ARGUMENT && Wire.transactions==before+1);
+        reject=false; malformed=true; c.get_imu_tracking_status(); assert(c.lastError().failure==KinisiFailure::MALFORMED_RESPONSE);
+    }
+    for (uint8_t minor : {uint8_t(1),uint8_t(2),uint8_t(3),uint8_t(99)}) {
+        reset(minor,20); KinisiController c; assert(c.begin(1000,0)); assert(!c.supportsImuTracking());
+        auto before=Wire.transactions; c.get_imu_tracking_status(); assert(Wire.transactions==before);
+    }
+    assert(legacy_capabilities_v219.fusion_experiment && !legacy_capabilities_v219.imu_tracking);
+    for (uint64_t sign : {UINT64_C(0), UINT64_C(0x8000000000000000)}) {
+        reset(4,20); KinisiController client; assert(client.begin(1000,0));
+        uint64_t bits = sign | UINT64_C(0x400921fb54442d18);
+        Wire.responder = [&](const std::vector<uint8_t>& request) {
+            std::vector<uint8_t> config(12);
+            kinisi_codec::writeUnsigned(config.data(),bits,8);
+            kinisi_codec::writeUnsigned(config.data()+8,5000000,4);
+            Wire.responses.push_back(frame(request[1],request[2] | uint16_t(request[3])<<8,config));
+        };
+        assert(client.get_imu_tracking_configuration().window_us==5000000);
+        ++bits;
+        client.get_imu_tracking_configuration();
+        assert(client.lastError().failure==KinisiFailure::MALFORMED_RESPONSE && !client.ready());
+    }
+}
+
 int main() {
+    imu_tracking();
     fusion_experiment();
     legacy_driver_sleep();
     board_idle();

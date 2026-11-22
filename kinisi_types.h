@@ -93,6 +93,10 @@ static const uint8_t KINISI_SET_FUSION_EXPERIMENT = 0x5f;
 static const uint8_t KINISI_GET_FUSION_STATUS = 0x60;
 static const uint8_t KINISI_GET_FUSION_VECTOR = 0x61;
 static const uint8_t KINISI_GET_FUSION_CONFIGURATION = 0x62;
+static const uint8_t KINISI_SET_IMU_TRACKING = 0x63;
+static const uint8_t KINISI_GET_IMU_TRACKING_STATUS = 0x64;
+static const uint8_t KINISI_GET_IMU_TRACKING_VECTOR = 0x65;
+static const uint8_t KINISI_GET_IMU_TRACKING_CONFIGURATION = 0x66;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -292,6 +296,33 @@ struct fusion_configuration {
     uint8_t mode; ///< Selected fusion_modes value; boot default is LEGACY_ENCODER.
     double mounting_yaw_rad; ///< Angle of board +X in the chassis XY plane, counterclockwise about chassis +Z; finite radians in [-pi, pi].
 };
+
+/** Volatile IMU-only relative tracking diagnostics. */
+struct imu_tracking_status {
+    uint8_t state; ///< ImuTrackingState value.
+    uint8_t fault; ///< ImuTrackingFault value.
+    uint8_t flags; ///< ImuTrackingFlag bitmask.
+    uint8_t reserved; ///< Reserved; must be zero.
+    uint32_t sequence; ///< Snapshot sequence; match vector reads.
+    uint64_t timestamp_us; ///< Monotonic joint accel/gyro sample watermark in board microseconds.
+    uint32_t elapsed_us; ///< Elapsed tracking time from the calibrated relative origin, in microseconds.
+    uint32_t accel_age_us; ///< Accel age in microseconds; UINT32_MAX if unavailable.
+    uint32_t gyro_age_us; ///< Gyro age in microseconds; UINT32_MAX if unavailable.
+};
+
+/** Volatile IMU-only relative tracking diagnostics. */
+struct imu_tracking_vector {
+    uint32_t sequence; ///< Match status sequence before associating health and time.
+    double x; ///< Pose X, body velocity X, or acceleration bias X, selected by kind.
+    double y; ///< Pose Y, body velocity Y, or acceleration bias Y, selected by kind.
+    double z; ///< Pose yaw, body yaw rate, or gyro Z bias, selected by kind.
+};
+
+/** Volatile IMU-only relative tracking diagnostics. */
+struct imu_tracking_configuration {
+    double mounting_yaw_rad; ///< Declared supported mounting yaw in radians.
+    uint32_t window_us; ///< Actual configured maximum relative tracking duration in microseconds.
+};
 enum class KinisiSubscriptionTrigger : uint8_t {
     PERIODIC = 0,
     ON_EVENT = 1,
@@ -335,6 +366,42 @@ enum class KinisiFusionVectorKind : uint8_t {
     FUSED_POSE = 2,
     FUSED_TWIST = 3,
     BIAS = 4,
+};
+enum class KinisiImuTrackingAction : uint8_t {
+    START = 0,
+    STOP = 1,
+    RESET = 2,
+    RECALIBRATE = 3,
+};
+enum class KinisiImuTrackingState : uint8_t {
+    STOPPED = 0,
+    CALIBRATING = 1,
+    TRACKING = 2,
+    FAULT = 3,
+    EXPIRED = 4,
+};
+enum class KinisiImuTrackingFault : uint8_t {
+    NONE = 0,
+    NOT_STATIONARY = 1,
+    IMU_UNAVAILABLE = 2,
+    STALE = 3,
+    TIMESTAMP = 4,
+    SATURATION = 5,
+    BIAS_NOT_READY = 6,
+    WINDOW_EXPIRED = 7,
+    INHIBITED = 8,
+    MOUNT_INVALID = 9,
+};
+enum class KinisiImuTrackingFlag : uint8_t {
+    ESTIMATE_VALID = 1,
+    BIAS_READY = 2,
+    RESTART_REQUIRED = 4,
+    MOUNT_CONFIRMED = 8,
+};
+enum class KinisiImuTrackingVectorKind : uint8_t {
+    POSE = 0,
+    TWIST = 1,
+    BIAS = 2,
 };
 enum class KinisiPwmFrequency : uint32_t {
     KHZ_10 = 10000UL,

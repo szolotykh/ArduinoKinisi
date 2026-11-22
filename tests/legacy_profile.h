@@ -25,5 +25,6 @@ static const KinisiBoardProfile legacy_profile_v215 = {
      {3, true, true, true, {4, {1500, 3000, 5400, 6900}, true}}},
     1, {0}, 1, {{0, true, true}}, {true}
 };
+static const KinisiExperimentCapabilities legacy_capabilities_v219 = {true};
 #pragma GCC diagnostic pop
 #endif
