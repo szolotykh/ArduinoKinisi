@@ -3,11 +3,16 @@
 #include <Arduino.h>
 #include <kinisi.h>
 #include <kinisi_codec.h>
+#include "../../legacy_profile.h"
 KinisiController controller;
 
 /** Check AVR numeric conversions against fixed binary64 bytes on target startup. */
 void setup() {
     Serial.begin(9600);
+    if (!legacy_profile.hasSensor(KinisiSensor::IMU) || legacy_profile.power.driver_sleep) {
+        Serial.println("FAIL legacy aggregate profile");
+        return;
+    }
     uint8_t bytes[8];
     kinisi_codec::writeDouble(bytes, -12.5);
     if (kinisi_codec::readUnsigned(bytes, 8) != UINT64_C(0xc029000000000000)) {
@@ -21,7 +26,7 @@ void setup() {
     }
     KinisiBoardProfile profile;
     if (!kinisiLookupBoardProfile(1, 0, 4, 0, profile) || profile.resources.motors != 4 ||
-            !profile.hasSensor(KinisiSensor::IMU)) {
+            !profile.hasSensor(KinisiSensor::IMU) || !profile.power.driver_sleep) {
         Serial.println("FAIL bundled flash profile");
         return;
     }
@@ -67,6 +72,12 @@ void setup() {
         double amps = controller.get_motor_current(0);
         if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(amps);
         controller.subscribe(KinisiTopic::MOTOR_CURRENT, 0, 100);
+    }
+    if (controller.supportsDriverSleep()) {
+        if (controller.set_driver_sleep(1)) {
+            uint8_t sleeping = controller.get_driver_sleep();
+            if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(sleeping);
+        }
     }
 }
 

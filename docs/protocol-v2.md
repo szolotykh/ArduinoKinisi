@@ -280,3 +280,39 @@ motor fields. `get_pwm_frequency()` reads the applied frequency in hertz.
 The board restores the saved setup with outputs stopped. Reconnecting during
 the same boot preserves running edits. Call Save again to retain those edits
 across the next restart.
+
+## Motor-driver sleep
+
+`supportsDriverSleep()` requires a READY session, protocol 2.15 or later in
+major version 2, and a known board profile with `power.driver_sleep` enabled
+(currently v0.4.0). Both sleep commands reject unsupported sessions before I/O.
+
+```cpp
+if (controller.supportsDriverSleep()) {
+    if (controller.set_driver_sleep(1)) {  // Board ACK received.
+        uint8_t sleeping = controller.get_driver_sleep();
+        if (controller.lastError().failure == KinisiFailure::NONE) {
+            Serial.println(sleeping);
+        }
+    }
+    bool awake = controller.set_driver_sleep(0);  // Wait for verified ACK.
+    if (!awake) { /* Inspect controller.lastError() before retrying. */ }
+}
+```
+
+The setter accepts uint8_t values 0 or 1 and returns false on failure. The
+getter returns 0 or 1, and also returns zero on failure: always check
+`lastError()` before treating zero as an awake result. Requests and responses
+fit the default 32-byte Wire buffer.
+
+Sleep stops and coasts all motors, cancels active control, and inhibits new
+drive requests while communication remains available. The getter reads the
+board-wide inhibit shared by all clients; zero does not imply that every
+individual motor is initialized. Wake leaves outputs stopped. Initialize or
+start closed-loop control again before issuing new targets. Prohibited
+operations report `KinisiErrorCode::DRIVERS_ASLEEP` (19) in `lastError()`.
+A failed wake leaves the inhibit set; correct the cause and explicitly retry.
+
+Sleep is volatile and is not saved to FRAM. Reconnecting preserves its current
+state and sends no automatic sleep or wake command. Reset clears the inhibit
+and follows the board's normal boot and saved-configuration policy.

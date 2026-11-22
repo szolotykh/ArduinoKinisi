@@ -85,6 +85,8 @@ static const uint8_t KINISI_GET_PWM_FREQUENCY = 0x57;
 static const uint8_t KINISI_SET_PWM_FREQUENCY = 0x58;
 static const uint8_t KINISI_SAVE_CONFIGURATION = 0x59;
 static const uint8_t KINISI_GET_CONFIGURATION_FIELD = 0x5A;
+static const uint8_t KINISI_SET_DRIVER_SLEEP = 0x5B;
+static const uint8_t KINISI_GET_DRIVER_SLEEP = 0x5C;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -107,6 +109,7 @@ enum class KinisiErrorCode : uint8_t {
     SENSOR_NOT_AVAILABLE = 16, // The selected sensor is not defined on this board.
     SUBSCRIPTION_LIMIT = 17, // This connection has no free subscription slots; unsubscribe an existing source first.
     SAMPLE_OUT_OF_RANGE = 18, // The sensor reading is saturated; no valid measurement can be returned.
+    DRIVERS_ASLEEP = 19, // Driver sleep is active. Explicitly wake the drivers before requesting this operation.
 };
 
 /** The state of the controller for the specified motor. */
