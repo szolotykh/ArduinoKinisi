@@ -9,7 +9,8 @@ KinisiController controller;
 /** Check AVR numeric conversions against fixed binary64 bytes on target startup. */
 void setup() {
     Serial.begin(9600);
-    if (!legacy_profile.hasSensor(KinisiSensor::IMU) || legacy_profile.power.driver_sleep) {
+    if (!legacy_profile.hasSensor(KinisiSensor::IMU) || legacy_profile.power.driver_sleep ||
+            !legacy_profile_v215.power.driver_sleep || legacy_profile_v215.power.board_idle) {
         Serial.println("FAIL legacy aggregate profile");
         return;
     }
@@ -77,6 +78,12 @@ void setup() {
         if (controller.set_driver_sleep(1)) {
             uint8_t sleeping = controller.get_driver_sleep();
             if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(sleeping);
+        }
+    }
+    if (controller.supportsBoardIdle()) {
+        if (controller.set_board_idle(1)) {
+            uint8_t idle = controller.get_board_idle();
+            if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(idle);
         }
     }
 }

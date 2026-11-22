@@ -14,6 +14,7 @@ KinisiBoardProfile	KEYWORD1
 supportsMotorCurrent	KEYWORD2
 supportsMotorFaults	KEYWORD2
 supportsDriverSleep	KEYWORD2
+supportsBoardIdle	KEYWORD2
 KinisiSubscriptionMode	KEYWORD1
 KinisiTopic	KEYWORD1
 KinisiTelemetrySample	KEYWORD1
@@ -95,3 +96,5 @@ save_configuration	KEYWORD2
 get_configuration_field	KEYWORD2
 set_driver_sleep	KEYWORD2
 get_driver_sleep	KEYWORD2
+set_board_idle	KEYWORD2
+get_board_idle	KEYWORD2

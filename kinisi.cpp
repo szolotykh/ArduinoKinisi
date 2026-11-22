@@ -822,3 +822,20 @@ uint8_t KinisiController::get_driver_sleep() {
     result = static_cast<uint8_t>(kinisi_codec::readUnsigned(response, 1));
     return result;
 }
+
+/** Encode SET_BOARD_IDLE, match its reply, and decode the payload. */
+bool KinisiController::set_board_idle(uint8_t idle) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(idle), 1);
+    return request(KINISI_SET_BOARD_IDLE, payload, 1, nullptr, 0);
+}
+
+/** Encode GET_BOARD_IDLE, match its reply, and decode the payload. */
+uint8_t KinisiController::get_board_idle() {
+    uint8_t payload[1] = {0};
+    uint8_t result = {};
+    uint8_t response[1] = {0};
+    if (!request(KINISI_GET_BOARD_IDLE, payload, 0, response, 1)) return result;
+    result = static_cast<uint8_t>(kinisi_codec::readUnsigned(response, 1));
+    return result;
+}

@@ -87,6 +87,8 @@ static const uint8_t KINISI_SAVE_CONFIGURATION = 0x59;
 static const uint8_t KINISI_GET_CONFIGURATION_FIELD = 0x5A;
 static const uint8_t KINISI_SET_DRIVER_SLEEP = 0x5B;
 static const uint8_t KINISI_GET_DRIVER_SLEEP = 0x5C;
+static const uint8_t KINISI_SET_BOARD_IDLE = 0x5D;
+static const uint8_t KINISI_GET_BOARD_IDLE = 0x5E;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -110,6 +112,7 @@ enum class KinisiErrorCode : uint8_t {
     SUBSCRIPTION_LIMIT = 17, // This connection has no free subscription slots; unsubscribe an existing source first.
     SAMPLE_OUT_OF_RANGE = 18, // The sensor reading is saturated; no valid measurement can be returned.
     DRIVERS_ASLEEP = 19, // Driver sleep is active. Explicitly wake the drivers before requesting this operation.
+    BOARD_IDLE = 20, // Board idle is active. Explicitly wake the board before changing driver sleep or starting a subscription.
 };
 
 /** The state of the controller for the specified motor. */

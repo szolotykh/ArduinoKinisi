@@ -316,3 +316,49 @@ A failed wake leaves the inhibit set; correct the cause and explicitly retry.
 Sleep is volatile and is not saved to FRAM. Reconnecting preserves its current
 state and sends no automatic sleep or wake command. Reset clears the inhibit
 and follows the board's normal boot and saved-configuration policy.
+
+## Communication-preserving board idle
+
+`supportsBoardIdle()` requires READY, protocol 2.16 or later within major
+version 2, and the exact board profile's `power.board_idle` capability
+(currently v0.4.0). Unsupported sessions fail locally before I/O. Protocol 2.15
+boards continue to support the separate driver-sleep API.
+
+```cpp
+if (controller.supportsBoardIdle()) {
+    if (controller.set_board_idle(1)) {  // Board ACK received.
+        uint8_t idle = controller.get_board_idle();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(idle);
+    }
+    bool awake = controller.set_board_idle(0);  // Explicit wake, outputs stopped.
+    if (!awake) { /* Inspect lastError(), correct the cause, then retry. */ }
+}
+```
+
+The setter accepts uint8_t values 0 or 1 and returns false on failure. The
+getter returns 0 or 1, or zero on failure: check `lastError()` before interpreting
+zero as awake. Both commands fit the default 32-byte Wire buffer.
+
+Entry stops control, sleeps the drivers, and pauses existing subscriptions.
+Heartbeat, time sync and supported direct reads remain available. New
+subscriptions and independent driver-sleep changes report `KinisiErrorCode::BOARD_IDLE`
+(20) through `lastError()`. Motion requests report `DRIVERS_ASLEEP` (19).
+The session stays connected. Keep calling
+`poll()` to service communication while idle.
+
+Wake preserves an independent driver-sleep request that was active on entry.
+Otherwise firmware verifies the initialized drivers and leaves outputs stopped.
+Read `get_driver_sleep()` separately; it reports the effective inhibit, including
+board idle, and cannot reveal the prior independent sleep request while idle.
+Waking the board does not necessarily wake its drivers. A failed transition keeps idle and motion inhibition active
+for an explicit retry. The SDK sends no extra driver, initialization,
+controller-start, or motion commands around idle transitions. Reconnect does
+not wake the board. Idle is volatile and clears on reset.
+
+`getSubscriptionSample()`, `getSubscribedEncoderOdometry()` and
+`getSubscribedPlatformOdometry()` retain the last sample and its original
+`timestamp_us` through idle and wake. A true return value means cached data is
+available; it does not certify freshness. Frames buffered before entry may
+still arrive. Track sample timestamps in their clock domain and wait for a new
+post-wake sample before using streamed data as current. Existing streams resume
+without resubscribing; a direct read does not refresh the subscription cache.

@@ -48,6 +48,7 @@ class ProfileTests(unittest.TestCase):
             lambda b: b['boards'][0]['board'].update(build_define='MP_V1'),
             lambda b: b['boards'][0]['resources'].update(motors=True),
             lambda b: b['boards'][3]['power'].update(driver_sleep=1),
+            lambda b: b['boards'][3]['power'].update(board_idle=1),
             lambda b: b['boards'][3]['power'].update(sleep_pin='PB0'),
             lambda b: b['boards'][3]['sensors']['imu'][0].update(id=1),
             lambda b: b['boards'][3]['motor_features'][0].update(current_limit='yes'),
@@ -63,6 +64,13 @@ class ProfileTests(unittest.TestCase):
         self.assertIn('temperature_ids[2]', generated['kinisi_board_profiles.h'])
         self.assertIn('KinisiImuFeatures imu[2]', generated['kinisi_board_profiles.h'])
         self.assertIn('2, {0, 1}, 2, {{0, true, true}, {1, true, false}}', generated['kinisi_board_profiles.cpp'])
+
+    def test_older_power_profiles_remain_valid(self):
+        for profile in self.bundle['boards']:
+            self.assertEqual(profile['power']['board_idle'], profile['board']['revision'] == '0.4.0')
+            profile['power'].pop('board_idle')
+        generated = profiles.generate(self.bundle)
+        self.assertIn('{true, false}', generated['kinisi_board_profiles.cpp'])
 
     def test_local_import_check_and_rejected_import_preserve_files(self):
         with tempfile.TemporaryDirectory() as directory:

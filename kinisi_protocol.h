@@ -53,12 +53,14 @@ public:
     bool supportsConfigurationSave() const;
     /** Board-wide driver sleep requires READY, a known profile and protocol 2.15+. */
     bool supportsDriverSleep() const;
+    /** Board idle requires READY, a known profile and protocol 2.16+. */
+    bool supportsBoardIdle() const;
     const KinisiCurrentLimitOptions* getMotorCurrentLimitOptions(uint8_t index = 0) const;
     bool supportsMotorCurrentLimit(uint8_t index = 0) const;
     bool supportsMotorFaults(uint8_t index = 0) const;
     /** Check topic hardware, protocol and full event size against Wire capacity. */
     bool supportsTopic(KinisiTopic topic, uint8_t index = 0) const;
-    /** Copy the latest sample without I/O; select the union member using its topic. */
+    /** Copy cached data without I/O; board idle pauses events, so check sample timestamps for freshness. */
     bool getSubscriptionSample(KinisiTopic topic, uint8_t index, KinisiTelemetrySample& sample) const;
     /** Failure of the most recent operation; inspect after every value-returning getter. */
     const KinisiError& lastError() const { return error_; }

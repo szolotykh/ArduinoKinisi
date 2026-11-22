@@ -160,6 +160,10 @@ bool KinisiProtocol::supportsDriverSleep() const {
     return ready_ && profile_known_ && profile_.power.driver_sleep &&
         identity_.protocol_major == 2 && identity_.protocol_minor >= 15;
 }
+bool KinisiProtocol::supportsBoardIdle() const {
+    return ready_ && profile_known_ && profile_.power.board_idle &&
+        identity_.protocol_major == 2 && identity_.protocol_minor >= 16;
+}
 bool KinisiProtocol::supportsPwmFrequency() const {
     return ready_ && identity_.protocol_major == 2 && identity_.protocol_minor >= 13 &&
         KINISI_WIRE_BUFFER_SIZE >= 8 && getPwmFrequencyOptions();
@@ -250,6 +254,8 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         case KINISI_GET_CONFIGURATION_FIELD: required_minor = 14; break;
         case KINISI_SET_DRIVER_SLEEP:
         case KINISI_GET_DRIVER_SLEEP: required_minor = 15; break;
+        case KINISI_SET_BOARD_IDLE:
+        case KINISI_GET_BOARD_IDLE: required_minor = 16; break;
         case KINISI_GET_PWM_FREQUENCY:
         case KINISI_SET_PWM_FREQUENCY: required_minor = 13; break;
         case KINISI_CLEAR_MOTOR_FAULTS: required_minor = 10; break;
@@ -269,6 +275,11 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     if (command == KINISI_SET_DRIVER_SLEEP || command == KINISI_GET_DRIVER_SLEEP) {
         if (!supportsDriverSleep()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
         if (command == KINISI_SET_DRIVER_SLEEP && (length != 1 || payload[0] > 1))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    }
+    if (command == KINISI_SET_BOARD_IDLE || command == KINISI_GET_BOARD_IDLE) {
+        if (!supportsBoardIdle()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+        if (command == KINISI_SET_BOARD_IDLE && (length != 1 || payload[0] > 1))
             return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
     }
     int subscription_slot = -1;
@@ -352,6 +363,8 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     if (!send(command, id, payload, length, response_length) ||
         !receive(command, command, id, response, response_length, started)) return false;
     if (command == KINISI_GET_DRIVER_SLEEP && response[0] > 1)
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (command == KINISI_GET_BOARD_IDLE && response[0] > 1)
         return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
     if (current_limit && (response[0] > 1 || !kinisi_codec::readUnsigned(response + 1, 2)))
         return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);

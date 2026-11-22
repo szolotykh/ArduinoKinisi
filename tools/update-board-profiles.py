@@ -33,8 +33,10 @@ def validate(bundle):
                (('pwm_frequency',) if 'pwm_frequency' in profile else ()) +
                (('power',) if 'power' in profile else ()), 'board profile')
         if 'power' in profile:
-            fields(profile['power'], ('driver_sleep',), 'power capabilities')
+            fields(profile['power'], ('driver_sleep',) + (('board_idle',) if 'board_idle' in profile['power'] else ()), 'power capabilities')
             require(type(profile['power']['driver_sleep']) is bool, 'Invalid driver sleep capability')
+            if 'board_idle' in profile['power']:
+                require(type(profile['power']['board_idle']) is bool, 'Invalid board idle capability')
         if 'pwm_frequency' in profile:
             pwm = profile['pwm_frequency']
             fields(pwm, ('default_hz', 'supported_hz'), 'PWM frequency')
@@ -98,7 +100,7 @@ def generate(bundle):
 
 enum class KinisiSensor : uint8_t { TEMPERATURE, IMU };
 struct KinisiBoardResources { uint8_t motors, encoders, gpio, status_leds; };
-struct KinisiPowerCapabilities { bool driver_sleep; };
+struct KinisiPowerCapabilities { bool driver_sleep; bool board_idle; };
 /** Discrete nominal thresholds in milliamps; count delimits the supported values. */
 struct KinisiCurrentLimitOptions { uint8_t threshold_count; uint16_t supported_thresholds_ma[THRESHOLD_CAPACITY]; bool can_disable; };
 struct KinisiPwmFrequencyOptions { uint32_t default_hz; uint8_t frequency_count; uint32_t supported_hz[PWM_CAPACITY]; };
@@ -165,7 +167,7 @@ const KinisiBoardProfile profiles[] KINISI_PROFILE_STORAGE = {
         pwm = board.get('pwm_frequency', {})
         frequencies = pwm.get('supported_hz', [])
         pwm_value = '{' + f"{pwm.get('default_hz', 0)}UL, {len(frequencies)}, {{{', '.join(str(v) + 'UL' for v in frequencies) or '0'}}}" + '}'
-        power_value = '{' + str(board.get('power', {}).get('driver_sleep', False)).lower() + '}'
+        power_value = '{' + ', '.join(str(board.get('power', {}).get(key, False)).lower() for key in ('driver_sleep', 'board_idle')) + '}'
         source += (f'    {{{model}, {revision}, {{{counts}}}, {pwm_value}, {{{motor_values}}}, '
                    f'{len(temp)}, {{{temp_values}}}, {len(imu)}, {{{imu_values}}}, {power_value}}},\n')
     source += '''};

@@ -9,6 +9,7 @@ MockSerial Serial;
 uint32_t fake_millis = 0;
 static uint8_t board = 4, minor = 7, event_topic = 3, event_index = 0;
 static double value = 12.5;
+static uint64_t sample_timestamp = UINT64_C(36028797018963975);
 
 static std::vector<uint8_t> frame(uint8_t command, uint16_t id, std::vector<uint8_t> data = {}) {
     std::vector<uint8_t> result = {uint8_t(data.size() + 3), command, uint8_t(id), uint8_t(id >> 8)};
@@ -20,7 +21,7 @@ static std::vector<uint8_t> event() {
     uint8_t size = event_topic == 2 ? 34 : event_topic == 4 ? 58 : event_topic == 6 ? 20 : 18;
     std::vector<uint8_t> payload(size + 2);
     payload[0] = event_topic; payload[1] = event_index;
-    kinisi_codec::writeUnsigned(payload.data() + 2, UINT64_C(36028797018963975), 8);
+    kinisi_codec::writeUnsigned(payload.data() + 2, sample_timestamp, 8);
     payload[10] = 0; payload[11] = 1;
     if (event_topic == 6) { payload[13] = 1; payload[18] = value != 0; }
     else for (uint8_t offset = 12; offset < payload.size(); offset += 8)
@@ -42,6 +43,7 @@ static void respond(const std::vector<uint8_t>& r) {
 static void reset(uint8_t revision = 4, uint8_t protocol = 8) {
     Wire = TwoWire(); fake_millis = 0; board = revision; minor = protocol; value = 12.5;
     Wire.responder = respond;
+    sample_timestamp = UINT64_C(36028797018963975);
 }
 
 static void topics_and_buffers() {
@@ -220,7 +222,53 @@ static void configured_settings() {
     assert(old.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == count);
 }
 
+static void board_idle_cache() {
+    reset(4, 16); KinisiController c; assert(c.begin());
+    bool idle = false;
+    event_topic = 3; event_index = 0; sample_timestamp = 100;
+    Wire.responder = [&](const std::vector<uint8_t>& r) {
+        uint8_t command = r[1]; uint16_t id = r[2] | uint16_t(r[3]) << 8;
+        assert(command != KINISI_SET_DRIVER_SLEEP); // No implicit driver-state change.
+        if (idle && (command == KINISI_SUBSCRIBE || command == KINISI_SUBSCRIBE_WITH_MODE || command == KINISI_SUBSCRIBE_CONFIGURED)) {
+            Wire.responses.push_back(frame(KINISI_ERROR, id, {command, uint8_t(KinisiErrorCode::BOARD_IDLE)}));
+            return;
+        }
+        if (command == KINISI_SET_BOARD_IDLE) idle = r[4] != 0;
+        if (command == KINISI_GET_BOARD_IDLE) Wire.responses.push_back(frame(command, id, {uint8_t(idle)}));
+        else if (command == KINISI_GET_DRIVER_SLEEP) Wire.responses.push_back(frame(command, id, {1}));
+        else if (command == KINISI_GET_TIME_STATUS) Wire.responses.push_back(frame(command, id, {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
+        else {
+            if (command == KINISI_POLL_TELEMETRY && !idle) Wire.responses.push_back(event());
+            Wire.responses.push_back(frame(command, id));
+        }
+    };
+    assert(c.subscribe(KinisiTopic::TEMPERATURE, 0, 250));
+    fake_millis += 250; assert(c.poll());
+    KinisiTelemetrySample sample;
+    assert(c.getSubscriptionSample(KinisiTopic::TEMPERATURE, 0, sample));
+    assert(sample.data.temperature.timestamp_us == 100);
+    assert(c.set_board_idle(1) && c.get_board_idle() == 1);
+    assert(!c.subscribe(KinisiTopic::TEMPERATURE, 0, 250));
+    assert(c.lastError().code == KinisiErrorCode::BOARD_IDLE && c.ready());
+    time_status clock = c.get_time_status();
+    assert(clock.clock_quality == 1 && c.lastError().failure == KinisiFailure::NONE);
+    assert(c.ping());
+    fake_millis += 1000; assert(c.poll());
+    assert(c.getSubscriptionSample(KinisiTopic::TEMPERATURE, 0, sample));
+    assert(sample.data.temperature.timestamp_us == 100); // Cached, not newly measured.
+    assert(c.set_board_idle(0));
+    assert(c.getSubscriptionSample(KinisiTopic::TEMPERATURE, 0, sample));
+    assert(sample.data.temperature.timestamp_us == 100); // Wake alone is not a fresh sample.
+    assert(c.get_driver_sleep() == 1 && c.lastError().failure == KinisiFailure::NONE);
+    sample_timestamp = 200;
+    fake_millis += 250; assert(c.poll());
+    assert(c.getSubscriptionSample(KinisiTopic::TEMPERATURE, 0, sample));
+    assert(sample.data.temperature.timestamp_us == 200);
+    assert(c.unsubscribe(KinisiTopic::TEMPERATURE, 0));
+}
+
 int main() {
+    board_idle_cache();
     configured_settings();
     on_change_mode();
     topics_and_buffers(); validation_and_lifecycle(); malformed_and_future_events();
