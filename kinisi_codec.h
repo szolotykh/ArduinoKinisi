@@ -36,6 +36,20 @@ inline void writeDouble(uint8_t* data, double value) {
     }
     writeUnsigned(data, bits, 8);
 }
+/** Preserve inclusive yaw endpoints when native binary32 pi rounds above wire pi.
+ * Only this bounded angle codec normalizes endpoints; other doubles stay exact.
+ * T is deduced from the native setter parameter and can be float in host tests.
+ */
+template <typename T>
+inline void writeFusionYaw(uint8_t* data, T value) {
+    const T nativePi = static_cast<T>(3.14159265358979323846);
+    if (sizeof(T) == 4 && (value == nativePi || value == -nativePi)) {
+        writeUnsigned(data, UINT64_C(0x400921fb54442d18) |
+            (value < 0 ? UINT64_C(0x8000000000000000) : 0), 8);
+    } else {
+        writeDouble(data, static_cast<double>(value));
+    }
+}
 /** Decode binary64; small AVR boards round to their native double precision. */
 inline double readDouble(const uint8_t* data) {
     uint64_t bits = readUnsigned(data, 8);

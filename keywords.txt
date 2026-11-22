@@ -98,3 +98,7 @@ set_driver_sleep	KEYWORD2
 get_driver_sleep	KEYWORD2
 set_board_idle	KEYWORD2
 get_board_idle	KEYWORD2
+set_fusion_experiment	KEYWORD2
+get_fusion_status	KEYWORD2
+get_fusion_vector	KEYWORD2
+get_fusion_configuration	KEYWORD2

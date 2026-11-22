@@ -839,3 +839,54 @@ uint8_t KinisiController::get_board_idle() {
     result = static_cast<uint8_t>(kinisi_codec::readUnsigned(response, 1));
     return result;
 }
+
+/** Encode SET_FUSION_EXPERIMENT, match its reply, and decode the payload. */
+bool KinisiController::set_fusion_experiment(uint8_t mode, double mounting_yaw_rad) {
+    uint8_t payload[9] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(mode), 1);
+    kinisi_codec::writeFusionYaw(payload + 1, mounting_yaw_rad);
+    return request(KINISI_SET_FUSION_EXPERIMENT, payload, 9, nullptr, 0);
+}
+
+/** Encode GET_FUSION_STATUS, match its reply, and decode the payload. */
+fusion_status KinisiController::get_fusion_status() {
+    uint8_t payload[1] = {0};
+    fusion_status result = {};
+    uint8_t response[28] = {0};
+    if (!request(KINISI_GET_FUSION_STATUS, payload, 0, response, 28)) return result;
+    result.mode = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.health = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 1, 1));
+    result.fault = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 2, 1));
+    result.flags = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 3, 1));
+    result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 4, 4));
+    result.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(response + 8, 8));
+    result.accel_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 16, 4));
+    result.gyro_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 20, 4));
+    result.encoder_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 24, 4));
+    return result;
+}
+
+/** Encode GET_FUSION_VECTOR, match its reply, and decode the payload. */
+fusion_vector KinisiController::get_fusion_vector(uint8_t kind) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(kind), 1);
+    fusion_vector result = {};
+    uint8_t response[28] = {0};
+    if (!request(KINISI_GET_FUSION_VECTOR, payload, 1, response, 28)) return result;
+    result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 0, 4));
+    result.x = kinisi_codec::readDouble(response + 4);
+    result.y = kinisi_codec::readDouble(response + 12);
+    result.z = kinisi_codec::readDouble(response + 20);
+    return result;
+}
+
+/** Encode GET_FUSION_CONFIGURATION, match its reply, and decode the payload. */
+fusion_configuration KinisiController::get_fusion_configuration() {
+    uint8_t payload[1] = {0};
+    fusion_configuration result = {};
+    uint8_t response[9] = {0};
+    if (!request(KINISI_GET_FUSION_CONFIGURATION, payload, 0, response, 9)) return result;
+    result.mode = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.mounting_yaw_rad = kinisi_codec::readDouble(response + 1);
+    return result;
+}

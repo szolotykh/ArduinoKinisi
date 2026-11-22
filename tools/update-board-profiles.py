@@ -31,7 +31,11 @@ def validate(bundle):
     for profile in bundle['boards']:
         fields(profile, ('board', 'resources', 'motor_features', 'sensors') +
                (('pwm_frequency',) if 'pwm_frequency' in profile else ()) +
-               (('power',) if 'power' in profile else ()), 'board profile')
+               (('power',) if 'power' in profile else ()) +
+               (('capabilities',) if 'capabilities' in profile else ()), 'board profile')
+        if 'capabilities' in profile:
+            fields(profile['capabilities'], ('fusion_experiment',), 'capabilities')
+            require(type(profile['capabilities']['fusion_experiment']) is bool, 'Invalid fusion capability')
         if 'power' in profile:
             fields(profile['power'], ('driver_sleep',) + (('board_idle',) if 'board_idle' in profile['power'] else ()), 'power capabilities')
             require(type(profile['power']['driver_sleep']) is bool, 'Invalid driver sleep capability')
@@ -101,6 +105,7 @@ def generate(bundle):
 enum class KinisiSensor : uint8_t { TEMPERATURE, IMU };
 struct KinisiBoardResources { uint8_t motors, encoders, gpio, status_leds; };
 struct KinisiPowerCapabilities { bool driver_sleep; bool board_idle; };
+struct KinisiExperimentCapabilities { bool fusion_experiment; };
 /** Discrete nominal thresholds in milliamps; count delimits the supported values. */
 struct KinisiCurrentLimitOptions { uint8_t threshold_count; uint16_t supported_thresholds_ma[THRESHOLD_CAPACITY]; bool can_disable; };
 struct KinisiPwmFrequencyOptions { uint32_t default_hz; uint8_t frequency_count; uint32_t supported_hz[PWM_CAPACITY]; };
@@ -117,7 +122,7 @@ struct KinisiBoardProfile {
     header += f'    KinisiMotorFeatures motor_features[{motors}];\n'
     header += f'    uint8_t temperature_count, temperature_ids[{temperatures}];\n'
     header += f'    uint8_t imu_count;\n    KinisiImuFeatures imu[{imus}];\n'
-    header += '    KinisiPowerCapabilities power;\n'
+    header += '    KinisiPowerCapabilities power;\n    KinisiExperimentCapabilities capabilities;\n'
     header += '''    /** Physical presence only; also check controller.supportsSensor before reading. */
     bool hasSensor(KinisiSensor kind, uint8_t index = 0) const {
         if (kind == KinisiSensor::TEMPERATURE) {
@@ -169,7 +174,7 @@ const KinisiBoardProfile profiles[] KINISI_PROFILE_STORAGE = {
         pwm_value = '{' + f"{pwm.get('default_hz', 0)}UL, {len(frequencies)}, {{{', '.join(str(v) + 'UL' for v in frequencies) or '0'}}}" + '}'
         power_value = '{' + ', '.join(str(board.get('power', {}).get(key, False)).lower() for key in ('driver_sleep', 'board_idle')) + '}'
         source += (f'    {{{model}, {revision}, {{{counts}}}, {pwm_value}, {{{motor_values}}}, '
-                   f'{len(temp)}, {{{temp_values}}}, {len(imu)}, {{{imu_values}}}, {power_value}}},\n')
+                   f'{len(temp)}, {{{temp_values}}}, {len(imu)}, {{{imu_values}}}, {power_value}, {{{str(board.get('capabilities', {}).get('fusion_experiment', False)).lower()}}}}},\n')
     source += '''};
 }
 

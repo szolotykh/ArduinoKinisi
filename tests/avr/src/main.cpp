@@ -25,6 +25,14 @@ void setup() {
         Serial.println("FAIL binary64 decoding");
         return;
     }
+    for (int8_t sign = -1; sign <= 1; sign += 2) {
+        kinisi_codec::writeFusionYaw(bytes, sign * PI);
+        if (kinisi_codec::readUnsigned(bytes, 8) != (UINT64_C(0x400921fb54442d18) |
+                (sign < 0 ? UINT64_C(0x8000000000000000) : 0))) {
+            Serial.println("FAIL yaw endpoint encoding");
+            return;
+        }
+    }
     KinisiBoardProfile profile;
     if (!kinisiLookupBoardProfile(1, 0, 4, 0, profile) || profile.resources.motors != 4 ||
             !profile.hasSensor(KinisiSensor::IMU) || !profile.power.driver_sleep) {
@@ -73,6 +81,16 @@ void setup() {
         double amps = controller.get_motor_current(0);
         if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(amps);
         controller.subscribe(KinisiTopic::MOTOR_CURRENT, 0, 100);
+    }
+    if (controller.supportsFusionExperiment()) {
+        fusion_configuration configuration = controller.get_fusion_configuration();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(configuration.mode);
+        fusion_status status = controller.get_fusion_status();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(status.sequence);
+        fusion_vector pose = controller.get_fusion_vector(KinisiFusionVectorKind::FUSED_POSE);
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(pose.x);
+        // Explicit legacy selection is compile checked only; never commands motion.
+        controller.set_fusion_experiment(KinisiFusionMode::LEGACY_ENCODER, 0.0);
     }
     if (controller.supportsDriverSleep()) {
         if (controller.set_driver_sleep(1)) {

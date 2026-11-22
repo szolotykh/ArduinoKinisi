@@ -89,6 +89,10 @@ static const uint8_t KINISI_SET_DRIVER_SLEEP = 0x5B;
 static const uint8_t KINISI_GET_DRIVER_SLEEP = 0x5C;
 static const uint8_t KINISI_SET_BOARD_IDLE = 0x5D;
 static const uint8_t KINISI_GET_BOARD_IDLE = 0x5E;
+static const uint8_t KINISI_SET_FUSION_EXPERIMENT = 0x5f;
+static const uint8_t KINISI_GET_FUSION_STATUS = 0x60;
+static const uint8_t KINISI_GET_FUSION_VECTOR = 0x61;
+static const uint8_t KINISI_GET_FUSION_CONFIGURATION = 0x62;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -261,6 +265,33 @@ struct motor_current_limit {
     bool enabled; ///< Current regulation is enabled on both outputs.
     uint16_t threshold_ma; ///< Nominal threshold in milliamps.
 };
+
+/** Volatile v0.4 fusion experiment diagnostics; see command descriptions. */
+struct fusion_status {
+    uint8_t mode; ///< Selected fusion_modes value.
+    uint8_t health; ///< Current fusion_health value.
+    uint8_t fault; ///< Current fusion_faults reason, or NONE.
+    uint8_t flags; ///< Bitmask of fusion_flags; ESTIMATE_VALID is required before using estimates.
+    uint32_t sequence; ///< Snapshot sequence; compare with each vector before associating this status.
+    uint64_t timestamp_us; ///< Monotonic board microseconds of this estimate snapshot; not wall time.
+    uint32_t accel_age_us; ///< UINT32_MAX means unavailable.
+    uint32_t gyro_age_us; ///< UINT32_MAX means unavailable.
+    uint32_t encoder_age_us; ///< UINT32_MAX means unavailable.
+};
+
+/** Volatile v0.4 fusion experiment diagnostics; see command descriptions. */
+struct fusion_vector {
+    uint32_t sequence; ///< Match GET_FUSION_STATUS sequence before associating its timestamp or health.
+    double x; ///< Pose X in metres, twist X in metres per second, or X accelerometer bias in metres per second squared, selected by kind.
+    double y; ///< Pose Y in metres, twist Y in metres per second, or Y accelerometer bias in metres per second squared, selected by kind.
+    double z; ///< Pose yaw in radians, twist yaw rate in radians per second, or Z gyro bias in radians per second, selected by kind.
+};
+
+/** Volatile v0.4 fusion experiment diagnostics; see command descriptions. */
+struct fusion_configuration {
+    uint8_t mode; ///< Selected fusion_modes value; boot default is LEGACY_ENCODER.
+    double mounting_yaw_rad; ///< Angle of board +X in the chassis XY plane, counterclockwise about chassis +Z; finite radians in [-pi, pi].
+};
 enum class KinisiSubscriptionTrigger : uint8_t {
     PERIODIC = 0,
     ON_EVENT = 1,
@@ -268,6 +299,42 @@ enum class KinisiSubscriptionTrigger : uint8_t {
 enum class KinisiSubscriptionDelivery : uint8_t {
     ALL = 0,
     ON_CHANGE = 1,
+};
+enum class KinisiFusionMode : uint8_t {
+    LEGACY_ENCODER = 0,
+    ENCODER_CORRECTION = 1,
+    FUSED = 2,
+};
+enum class KinisiFusionHealth : uint8_t {
+    DISABLED = 0,
+    WAITING = 1,
+    HEALTHY = 2,
+    FAULT = 3,
+};
+enum class KinisiFusionFault : uint8_t {
+    NONE = 0,
+    MOUNT_INVALID = 1,
+    ENCODER_UNAVAILABLE = 2,
+    IMU_UNAVAILABLE = 3,
+    STALE = 4,
+    TIMESTAMP = 5,
+    SATURATION = 6,
+    BIAS_NOT_READY = 7,
+    DISCONTINUITY = 8,
+    INHIBITED = 9,
+};
+enum class KinisiFusionFlag : uint8_t {
+    ESTIMATE_VALID = 1,
+    BIAS_READY = 2,
+    FRESH_TARGET_REQUIRED = 4,
+    CORRECTION_ACTIVE = 8,
+};
+enum class KinisiFusionVectorKind : uint8_t {
+    ENCODER_POSE = 0,
+    ENCODER_TWIST = 1,
+    FUSED_POSE = 2,
+    FUSED_TWIST = 3,
+    BIAS = 4,
 };
 enum class KinisiPwmFrequency : uint32_t {
     KHZ_10 = 10000UL,

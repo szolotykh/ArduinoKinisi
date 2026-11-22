@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include "kinisi.h"
+#include "kinisi_codec.h"
 #include "legacy_profile.h"
 
 TwoWire Wire;
@@ -46,6 +47,7 @@ static void reset(uint8_t board = 4, uint8_t minor = 5, uint8_t board_patch = 0)
 }
 
 static void profiles() {
+    assert(!legacy_profile.capabilities.fusion_experiment && !legacy_profile_v215.capabilities.fusion_experiment);
     assert(legacy_profile.resources.motors == 4 && legacy_profile.pwm_frequency.default_hz == 100000UL);
     assert(legacy_profile.motor_features[3].id == 3 && legacy_profile.motor_features[3].current_limit);
     assert(legacy_profile.hasSensor(KinisiSensor::IMU) && legacy_profile.imu[0].gyroscope);
@@ -593,7 +595,92 @@ static void board_idle(uint8_t idle_revision = 4, uint8_t idle_patch = 0, uint8_
     assert(c.get_board_idle() == 1 && c.lastError().failure == KinisiFailure::NONE);
 }
 
+static void fusion_experiment() {
+    const double pi = 3.14159265358979323846;
+    uint8_t encoded[8];
+    for (int sign : {-1, 1}) {
+        const float endpoint = sign * static_cast<float>(pi);
+        kinisi_codec::writeFusionYaw(encoded, endpoint);
+        assert(kinisi_codec::readUnsigned(encoded, 8) == (UINT64_C(0x400921fb54442d18) |
+            (sign < 0 ? UINT64_C(0x8000000000000000) : 0)));
+        const float outside = nextafterf(endpoint, sign * INFINITY);
+        kinisi_codec::writeFusionYaw(encoded, outside);
+        assert(fabs(kinisi_codec::readDouble(encoded)) > pi);
+        // Host binary64 must not normalize widened float endpoints or adjacent doubles.
+        kinisi_codec::writeFusionYaw(encoded, static_cast<double>(endpoint));
+        assert(fabs(kinisi_codec::readDouble(encoded)) > pi);
+        kinisi_codec::writeFusionYaw(encoded, sign * pi);
+        assert(kinisi_codec::readDouble(encoded) == sign * pi);
+    }
+    struct Gate { uint8_t minor, patch, version; bool supported; };
+    for (const Gate& gate : {Gate{4,0,19,true}, Gate{4,0,20,true}, Gate{4,0,18,false},
+            Gate{4,1,19,false}, Gate{3,0,19,false}, Gate{3,1,19,false}, Gate{99,0,19,false}}) {
+        reset(gate.minor, gate.version, gate.patch);
+        KinisiController c;
+        assert(!c.supportsFusionExperiment());
+        assert(c.begin(1000, 0) && c.supportsFusionExperiment() == gate.supported);
+        auto before = Wire.transactions;
+        if (!gate.supported) {
+            assert(!c.set_fusion_experiment(2, 0));
+            c.get_fusion_status(); c.get_fusion_vector(0); c.get_fusion_configuration();
+            assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+            continue;
+        }
+        bool reject = false, malformed = false;
+        double expectedYaw = -.5;
+        Wire.responder = [&](const std::vector<uint8_t>& r) {
+            const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+            assert(r[1] >= KINISI_SET_FUSION_EXPERIMENT && r[1] <= KINISI_GET_FUSION_CONFIGURATION);
+            if (reject) { Wire.responses.push_back(frame(KINISI_ERROR, id, {r[1], uint8_t(KinisiErrorCode::INVALID_ARGUMENT)})); return; }
+            std::vector<uint8_t> data;
+            if (r[1] == KINISI_SET_FUSION_EXPERIMENT) {
+                assert(r.size() == 13 && r[4] == 2 && kinisi_codec::readDouble(r.data()+5) == expectedYaw);
+            } else if (r[1] == KINISI_GET_FUSION_STATUS) {
+                data.resize(28); data[0]=malformed ? 3 : 2; data[1]=2; data[3]=3;
+                kinisi_codec::writeUnsigned(data.data()+4, 42, 4);
+                kinisi_codec::writeUnsigned(data.data()+8, (UINT64_C(1)<<60)+7, 8);
+                kinisi_codec::writeUnsigned(data.data()+24, 30, 4);
+            } else if (r[1] == KINISI_GET_FUSION_VECTOR) {
+                assert(r.size() == 5 && r[4] == 2); data.resize(28);
+                kinisi_codec::writeUnsigned(data.data(),42,4);
+                kinisi_codec::writeDouble(data.data()+4,1.25);
+                kinisi_codec::writeDouble(data.data()+12,-2);
+                kinisi_codec::writeDouble(data.data()+20,.5);
+            } else {
+                data.resize(9);data[0]=2;kinisi_codec::writeDouble(data.data()+1,-.5);
+            }
+            assert(data.size()+4 <= 32); Wire.responses.push_back(frame(r[1],id,data));
+        };
+        assert(c.set_fusion_experiment(KinisiFusionMode::FUSED,-.5));
+        for (int sign : {-1, 1}) {
+            expectedYaw = sign * pi;
+            assert(c.set_fusion_experiment(2, expectedYaw));
+            const auto count = Wire.transactions;
+            assert(!c.set_fusion_experiment(2, nextafter(expectedYaw, sign * INFINITY)));
+            assert(!c.set_fusion_experiment(2, nextafterf(static_cast<float>(expectedYaw), sign * INFINITY)));
+            assert(!c.set_fusion_experiment(2, static_cast<float>(expectedYaw)));
+            assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == count);
+        }
+        auto status = c.get_fusion_status();
+        assert(c.lastError().failure == KinisiFailure::NONE && status.sequence == 42);
+        assert(status.timestamp_us == (UINT64_C(1)<<60)+7 && status.encoder_age_us == 30);
+        auto vector = c.get_fusion_vector(KinisiFusionVectorKind::FUSED_POSE);
+        assert(vector.sequence == 42 && vector.x == 1.25 && vector.y == -2 && vector.z == .5);
+        assert(c.get_fusion_configuration().mounting_yaw_rad == -.5);
+        before = Wire.transactions;
+        assert(!c.set_fusion_experiment(3,0)); assert(!c.set_fusion_experiment(2,4));
+        c.get_fusion_vector(5);
+        assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == before);
+        reject = true; before = Wire.transactions;
+        assert(!c.set_fusion_experiment(2,0));
+        assert(c.lastError().code == KinisiErrorCode::INVALID_ARGUMENT && c.ready() && Wire.transactions == before+1);
+        reject = false; malformed = true; c.get_fusion_status();
+        assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    }
+}
+
 int main() {
+    fusion_experiment();
     legacy_driver_sleep();
     board_idle();
     board_idle(3, 0, 18);

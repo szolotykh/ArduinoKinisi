@@ -164,6 +164,12 @@ bool KinisiProtocol::supportsDriverSleep() const {
         return identity_.protocol_minor >= 17;
     return identity_.board_minor == 4 && identity_.board_patch == 0 && identity_.protocol_minor >= 15;
 }
+bool KinisiProtocol::supportsFusionExperiment() const {
+    return ready_ && profile_known_ && profile_.capabilities.fusion_experiment &&
+        identity_.board_model == 1 && identity_.board_major == 0 &&
+        identity_.board_minor == 4 && identity_.board_patch == 0 &&
+        identity_.protocol_major == 2 && identity_.protocol_minor >= 19;
+}
 bool KinisiProtocol::supportsBoardIdle() const {
     if (!ready_ || !profile_known_ || !profile_.power.board_idle ||
         identity_.protocol_major != 2 || identity_.board_model != 1 || identity_.board_major != 0)
@@ -290,6 +296,15 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         if (command == KINISI_SET_BOARD_IDLE && (length != 1 || payload[0] > 1))
             return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
     }
+    const bool fusion = command >= KINISI_SET_FUSION_EXPERIMENT && command <= KINISI_GET_FUSION_CONFIGURATION;
+    if (fusion) {
+        if (!supportsFusionExperiment()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+        if (command == KINISI_SET_FUSION_EXPERIMENT && (length != 9 || payload[0] > 2 ||
+            !isfinite(kinisi_codec::readDouble(payload + 1)) || fabs(kinisi_codec::readDouble(payload + 1)) > 3.141592653589793))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+        if (command == KINISI_GET_FUSION_VECTOR && (length != 1 || payload[0] > 4))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    }
     int subscription_slot = -1;
     if (command == KINISI_SUBSCRIBE || command == KINISI_SUBSCRIBE_WITH_MODE || command == KINISI_SUBSCRIBE_CONFIGURED || command == KINISI_UNSUBSCRIBE) {
         const KinisiTopic topic = static_cast<KinisiTopic>(payload[0]);
@@ -370,6 +385,15 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     uint32_t started = millis();
     if (!send(command, id, payload, length, response_length) ||
         !receive(command, command, id, response, response_length, started)) return false;
+    if (command == KINISI_GET_FUSION_STATUS && (response[0] > 2 || response[1] > 3 || response[2] > 9 || response[3] > 15))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (command == KINISI_GET_FUSION_VECTOR) {
+        for (uint8_t offset = 4; offset < 28; offset += 8)
+            if (!isfinite(kinisi_codec::readDouble(response + offset))) return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    }
+    if (command == KINISI_GET_FUSION_CONFIGURATION && (response[0] > 2 ||
+        !isfinite(kinisi_codec::readDouble(response + 1)) || fabs(kinisi_codec::readDouble(response + 1)) > 3.141592653589793))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
     if (command == KINISI_GET_DRIVER_SLEEP && response[0] > 1)
         return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
     if (command == KINISI_GET_BOARD_IDLE && response[0] > 1)

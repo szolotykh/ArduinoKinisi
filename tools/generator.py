@@ -21,7 +21,30 @@ SESSION_COMMANDS = {'PING', 'SET_HEARTBEAT_CONFIG', 'SUBSCRIBE_ODOMETRY',
 
 
 
+
+FUSION_CATALOGS = [
+    ('fusion_modes', 'FusionMode', 'FUSION_MODE', ['LEGACY_ENCODER', 'ENCODER_CORRECTION', 'FUSED']),
+    ('fusion_health', 'FusionHealth', 'FUSION_HEALTH', ['DISABLED', 'WAITING', 'HEALTHY', 'FAULT']),
+    ('fusion_faults', 'FusionFault', 'FUSION_FAULT', ['NONE', 'MOUNT_INVALID', 'ENCODER_UNAVAILABLE', 'IMU_UNAVAILABLE', 'STALE', 'TIMESTAMP', 'SATURATION', 'BIAS_NOT_READY', 'DISCONTINUITY', 'INHIBITED']),
+    ('fusion_flags', 'FusionFlag', 'FUSION_FLAG', ['ESTIMATE_VALID', 'BIAS_READY', 'FRESH_TARGET_REQUIRED', 'CORRECTION_ACTIVE']),
+    ('fusion_vectors', 'FusionVectorKind', 'FUSION_VECTOR', ['ENCODER_POSE', 'ENCODER_TWIST', 'FUSED_POSE', 'FUSED_TWIST', 'BIAS']),
+]
+
+def validate_fusion(schema):
+    commands = {c['command'] for c in schema.get('commands', [])}
+    required = {'SET_FUSION_EXPERIMENT', 'GET_FUSION_STATUS', 'GET_FUSION_VECTOR', 'GET_FUSION_CONFIGURATION'}
+    if not commands & required and not any(key in schema for key, *_ in FUSION_CATALOGS):
+        return
+    if not required <= commands:
+        raise ValueError('Incomplete fusion command family')
+    for key, _, _, names in FUSION_CATALOGS:
+        ids = [1, 2, 4, 8] if key == 'fusion_flags' else list(range(len(names)))
+        values = schema.get(key, [])
+        if [(v.get('id'), v.get('name')) for v in values] != list(zip(ids, names)) or any(type(v.get('id')) is not int for v in values):
+            raise ValueError('Invalid ' + key + ' catalog')
+
 def validate_pwm_frequency(schema):
+    validate_fusion(schema)
     values = schema.get('pwm_frequencies', [])
     expected = [(v, 'KHZ_' + str(v // 1000)) for v in (10000, 20000, 25000, 50000, 100000)]
     if [(v.get('id'), v.get('name')) for v in values] != expected or any(type(v.get('id')) is not int for v in values):
@@ -80,7 +103,7 @@ def generate(schema, output, check=False):
         for p in o['properties']:
             types.append(f"    {p['type']} {p['name']}; ///< {p['description']}\n")
         types.append('};\n')
-    for key, name in [('subscription_triggers', 'KinisiSubscriptionTrigger'), ('subscription_deliveries', 'KinisiSubscriptionDelivery')]:
+    for key, name in [('subscription_triggers', 'KinisiSubscriptionTrigger'), ('subscription_deliveries', 'KinisiSubscriptionDelivery')] + [(key, 'Kinisi' + name) for key, name, _, _ in FUSION_CATALOGS]:
         types.append(f'enum class {name} : uint8_t {{\n')
         for item in schema.get(key, []):
             types.append(f"    {item['name']} = {item['id']},\n")
@@ -175,7 +198,8 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
         for p in props:
             target = f'payload + {offset}'
             if p['type'] == 'double':
-                source.append(f'    kinisi_codec::writeDouble({target}, {p["name"]});\n')
+                codec = 'writeFusionYaw' if c['command'] == 'SET_FUSION_EXPERIMENT' and p['name'] == 'mounting_yaw_rad' else 'writeDouble'
+                source.append(f'    kinisi_codec::{codec}({target}, {p["name"]});\n')
             else:
                 source.append(f'    kinisi_codec::writeUnsigned({target}, static_cast<uint64_t>({p["name"]}), {size(p["type"])});\n')
             offset += size(p['type'])
@@ -192,6 +216,9 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
             source.append('    return result;\n}\n')
         else:
             source.append(f'    return request(KINISI_{c["command"]}, payload, {n}, nullptr, 0);\n}}\n')
+    if schema.get('fusion_modes'):
+        header.append('    bool set_fusion_experiment(KinisiFusionMode mode, double yaw) { return set_fusion_experiment(static_cast<uint8_t>(mode), yaw); }\n')
+        header.append('    fusion_vector get_fusion_vector(KinisiFusionVectorKind kind) { return get_fusion_vector(static_cast<uint8_t>(kind)); }\n')
     header.append('};\n#endif\n')
     keywords = '# Generated Arduino syntax map.\nKinisiController\tKEYWORD1\nbegin\tKEYWORD2\nready\tKEYWORD2\nboardInfo\tKEYWORD2\nlastError\tKEYWORD2\n'
     keywords += 'poll\tKEYWORD2\ngetSubscribedEncoderOdometry\tKEYWORD2\ngetSubscribedPlatformOdometry\tKEYWORD2\n'
