@@ -172,7 +172,7 @@ bool KinisiProtocol::supportsFusionExperiment() const {
 }
 
 bool KinisiProtocol::supportsFeedbackSourceSelector() const {
-    return ready_ && profile_known_ && profile_.capabilities.feedback_source_selector &&
+    return KINISI_WIRE_BUFFER_SIZE >= 32 && ready_ && profile_known_ && profile_.capabilities.feedback_source_selector &&
         identity_.board_model == 1 && identity_.board_major == 0 &&
         identity_.board_minor == 4 && identity_.board_patch == 0 &&
         identity_.protocol_major == 2 && identity_.protocol_minor >= 21;

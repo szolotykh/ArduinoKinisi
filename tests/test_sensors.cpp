@@ -840,6 +840,20 @@ static void feedback_source_selector() {
 }
 
 int main() {
+    if (KINISI_WIRE_BUFFER_SIZE < 32) {
+        reset(4, 21);
+        KinisiController controller;
+        assert(controller.begin(1000, 0) && !controller.supportsFeedbackSourceSelector());
+        const auto transactions = Wire.transactions;
+        assert(!controller.set_feedback_source(KinisiFeedbackSource::IMU_ONLY));
+        controller.get_feedback_source_status();
+        controller.get_feedback_source_vector(KinisiFeedbackSourceVectorKind::POSE, 3, 42);
+        assert(!controller.set_feedback_fusion_mount(0));
+        controller.get_feedback_fusion_mount();
+        assert(Wire.transactions == transactions && controller.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND);
+        puts("PASS selector withheld when Wire cannot carry a complete vector");
+        return 0;
+    }
     feedback_source_selector();
     imu_tracking();
     fusion_experiment();

@@ -440,7 +440,9 @@ rest of the running setup. Reboot requires a fresh mount or calibration as appli
 Restored preference is observable in selector status after reboot. Tracking data,
 origin and controller targets are volatile.
 
-Call `controller.readFeedbackSourceSnapshot(status, pose, twist)` and branch on
+The complete selector requires a Wire buffer of at least 32 bytes. On a smaller
+buffer `supportsFeedbackSourceSelector()` returns false and selector requests fail
+locally. Call `controller.readFeedbackSourceSnapshot(status, pose, twist)` and branch on
 `KinisiFeedbackRead`. `VALID` supplies a matched sample. `UNAVAILABLE` supplies a
 board-reported invalid status. `CHANGED` means three successive reads could not
 establish a common sample. `ERROR` preserves the transport or controller failure in
