@@ -741,7 +741,81 @@ static void imu_tracking() {
     }
 }
 
+static void feedback_source_selector() {
+    reset(4, 21);
+    KinisiController c;
+    assert(!c.supportsFeedbackSourceSelector());
+    assert(c.begin(1000, 0) && c.supportsFeedbackSourceSelector());
+    uint8_t source = 0;
+    uint32_t origin = 3;
+    bool changing = false, expired = false, unsafe = false, malformed = false;
+    auto count = Wire.transactions;
+    Wire.responder = [&](const std::vector<uint8_t>& request) {
+        const uint8_t cmd = request[1];
+        const uint16_t id = request[2] | uint16_t(request[3]) << 8;
+        std::vector<uint8_t> data;
+        if (cmd == KINISI_GET_FEEDBACK_SOURCE_STATUS) {
+            data.resize(25);
+            data[0] = source; data[1] = expired ? 255 : source; data[2] = expired ? 0 : 1;
+            data[3] = malformed ? 11 : expired ? 5 : 0;
+            kinisi_codec::writeUnsigned(data.data()+4, expired ? 0 : 42, 4);
+            kinisi_codec::writeUnsigned(data.data()+8, expired ? 0 : (UINT64_C(1)<<60)+7, 8);
+            kinisi_codec::writeUnsigned(data.data()+16, changing ? ++origin : origin, 4);
+            kinisi_codec::writeUnsigned(data.data()+21, expired ? UINT32_MAX : 937, 4);
+        } else if (cmd == KINISI_GET_FEEDBACK_SOURCE_VECTOR) {
+            assert(request.size() == 5 && request[4] < 2);
+            data.resize(28); kinisi_codec::writeUnsigned(data.data(), 42, 4);
+            kinisi_codec::writeDouble(data.data()+4, request[4] == 0 ? 1.25 : -0.5);
+        } else if (cmd == KINISI_SET_FEEDBACK_SOURCE && unsafe) {
+            Wire.responses.push_back(frame(KINISI_ERROR, id, {cmd, uint8_t(KinisiErrorCode::SOURCE_SWITCH_UNSAFE)}));
+            return;
+        } else if (cmd == KINISI_SET_FEEDBACK_FUSION_MOUNT) {
+            assert(request.size() == 12 && kinisi_codec::readDouble(request.data()+4) == -3.141592653589793);
+        } else if (cmd == KINISI_GET_FEEDBACK_FUSION_MOUNT) {
+            data.resize(9); data[0] = 1; kinisi_codec::writeDouble(data.data()+1, -3.141592653589793);
+        } else assert(false);
+        assert(data.size()+4 <= 32);
+        Wire.responses.push_back(frame(cmd, id, data));
+    };
+    feedback_source_status status{};
+    feedback_source_vector pose{}, twist{};
+    for (source = 0; source < 3; ++source) {
+        assert(c.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::VALID);
+        assert(status.requested == source && status.active == source && status.valid && status.origin_id == origin &&
+            status.sequence == 42 && status.timestamp_us == (UINT64_C(1)<<60)+7 && status.age_us == 937);
+        assert(pose.x == 1.25 && twist.x == -0.5);
+    }
+    source = 2; changing = true;
+    assert(c.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::CHANGED);
+    assert(pose.x == 0 && twist.x == 0 && !status.valid);
+    assert(Wire.transactions == count + 24);
+    changing = false; expired = true;
+    assert(c.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::UNAVAILABLE);
+    assert(!status.valid && status.active == 255 && status.reason == 5 && status.age_us == UINT32_MAX);
+    unsafe = true; count = Wire.transactions;
+    assert(!c.set_feedback_source(KinisiFeedbackSource::IMU_ONLY) && c.lastError().code == KinisiErrorCode::SOURCE_SWITCH_UNSAFE);
+    assert(Wire.transactions == count + 1 && c.ready());
+    assert(!c.set_feedback_source(KinisiFeedbackSource::NONE));
+    c.get_feedback_source_vector(2);
+    assert(!c.set_feedback_fusion_mount(NAN) && !c.set_feedback_fusion_mount(INFINITY));
+    assert(Wire.transactions == count + 1 && c.lastError().failure == KinisiFailure::INVALID_ARGUMENT);
+    assert(c.set_feedback_fusion_mount(-3.141592653589793));
+    assert(c.get_feedback_fusion_mount().confirmed == 1);
+    malformed = true;
+    c.get_feedback_source_status();
+    assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    for (uint8_t minor : {uint8_t(3),uint8_t(4)}) {
+        reset(minor, minor == 4 ? 20 : 21);
+        assert(c.begin(1000, 0) && !c.supportsFeedbackSourceSelector());
+        count = Wire.transactions;
+        assert(!c.set_feedback_source(0)); c.get_feedback_source_status(); c.get_feedback_source_vector(0);
+        assert(!c.set_feedback_fusion_mount(0)); c.get_feedback_fusion_mount();
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == count);
+    }
+}
+
 int main() {
+    feedback_source_selector();
     imu_tracking();
     fusion_experiment();
     legacy_driver_sleep();

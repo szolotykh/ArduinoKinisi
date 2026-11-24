@@ -171,6 +171,13 @@ bool KinisiProtocol::supportsFusionExperiment() const {
         identity_.protocol_major == 2 && identity_.protocol_minor >= 19;
 }
 
+bool KinisiProtocol::supportsFeedbackSourceSelector() const {
+    return ready_ && profile_known_ && profile_.capabilities.feedback_source_selector &&
+        identity_.board_model == 1 && identity_.board_major == 0 &&
+        identity_.board_minor == 4 && identity_.board_patch == 0 &&
+        identity_.protocol_major == 2 && identity_.protocol_minor >= 21;
+}
+
 bool KinisiProtocol::supportsImuTracking() const {
     return ready_ && profile_known_ && profile_.capabilities.imu_tracking &&
         identity_.board_model == 1 && identity_.board_major == 0 &&
@@ -303,6 +310,14 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         if (command == KINISI_SET_BOARD_IDLE && (length != 1 || payload[0] > 1))
             return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
     }
+    if (command >= KINISI_SET_FEEDBACK_SOURCE && command <= KINISI_GET_FEEDBACK_FUSION_MOUNT) {
+        if (!supportsFeedbackSourceSelector()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+        if ((command == KINISI_SET_FEEDBACK_SOURCE && (length != 1 || payload[0] > 2)) ||
+            (command == KINISI_GET_FEEDBACK_SOURCE_VECTOR && (length != 1 || payload[0] > 1)) ||
+            (command == KINISI_SET_FEEDBACK_FUSION_MOUNT && (length != 8 ||
+             (kinisi_codec::readUnsigned(payload, 8) & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x400921fb54442d18))))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    }
     if (command >= KINISI_SET_IMU_TRACKING && command <= KINISI_GET_IMU_TRACKING_CONFIGURATION) {
         if (!supportsImuTracking()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
         if (command == KINISI_SET_IMU_TRACKING) {
@@ -405,10 +420,17 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     uint32_t started = millis();
     if (!send(command, id, payload, length, response_length) ||
         !receive(command, command, id, response, response_length, started)) return false;
+    if (command == KINISI_GET_FEEDBACK_SOURCE_STATUS &&
+        (response[0] > 2 || response[2] > 1 || response[3] > 9 ||
+         (response[2] ? response[1] != response[0] || response[3] != 0 : response[1] != 255 || response[3] == 0)))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (command == KINISI_GET_FEEDBACK_FUSION_MOUNT && (response[0] > 1 ||
+        (kinisi_codec::readUnsigned(response + 1, 8) & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x400921fb54442d18)))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
     if (command == KINISI_GET_IMU_TRACKING_STATUS &&
         (response[0] > 4 || response[1] > 9 || response[2] > 15 || response[3] != 0))
         return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
-    if (command == KINISI_GET_IMU_TRACKING_VECTOR) {
+    if (command == KINISI_GET_FEEDBACK_SOURCE_VECTOR || command == KINISI_GET_IMU_TRACKING_VECTOR) {
         for (uint8_t offset = 4; offset < 28; offset += 8)
             if (!isfinite(kinisi_codec::readDouble(response + offset))) return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
     }

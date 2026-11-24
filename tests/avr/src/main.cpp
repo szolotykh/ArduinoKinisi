@@ -82,6 +82,14 @@ void setup() {
         if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(amps);
         controller.subscribe(KinisiTopic::MOTOR_CURRENT, 0, 100);
     }
+    if (controller.supportsFeedbackSourceSelector()) {
+        feedback_source_status status{};
+        feedback_source_vector pose{}, twist{};
+        if (controller.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::VALID) {
+            Serial.println(status.sequence);
+            Serial.println(pose.x);
+        }
+    }
     if (controller.supportsImuTracking()) {
         imu_tracking_status status = controller.get_imu_tracking_status();
         if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(status.elapsed_us);

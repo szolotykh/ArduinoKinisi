@@ -32,6 +32,29 @@ FUSION_CATALOGS = [
 
 IMU_TRACKING_CATALOGS = [('imu_tracking_actions', 'ImuTrackingAction', 'IMU_TRACKING_ACTION', ['START', 'STOP', 'RESET', 'RECALIBRATE']), ('imu_tracking_states', 'ImuTrackingState', 'IMU_TRACKING_STATE', ['STOPPED', 'CALIBRATING', 'TRACKING', 'FAULT', 'EXPIRED']), ('imu_tracking_faults', 'ImuTrackingFault', 'IMU_TRACKING_FAULT', ['NONE', 'NOT_STATIONARY', 'IMU_UNAVAILABLE', 'STALE', 'TIMESTAMP', 'SATURATION', 'BIAS_NOT_READY', 'WINDOW_EXPIRED', 'INHIBITED', 'MOUNT_INVALID']), ('imu_tracking_flags', 'ImuTrackingFlag', 'IMU_TRACKING_FLAG', ['ESTIMATE_VALID', 'BIAS_READY', 'RESTART_REQUIRED', 'MOUNT_CONFIRMED']), ('imu_tracking_vectors', 'ImuTrackingVectorKind', 'IMU_TRACKING_VECTOR', ['POSE', 'TWIST', 'BIAS'])]
 
+FEEDBACK_CATALOGS = [
+    ('feedback_sources', 'FeedbackSource', 'FEEDBACK_SOURCE', ['ENCODER', 'IMU_ONLY', 'FUSED', 'NONE']),
+    ('feedback_source_reasons', 'FeedbackSourceReason', 'FEEDBACK_SOURCE_REASON',
+     ['OK', 'NOT_STARTED', 'CALIBRATING', 'UNAVAILABLE', 'STALE', 'EXPIRED', 'FAULT', 'INHIBITED', 'WAITING_SAMPLE', 'MOUNT_REQUIRED']),
+    ('feedback_source_vectors', 'FeedbackSourceVectorKind', 'FEEDBACK_SOURCE_VECTOR', ['POSE', 'TWIST']),
+]
+
+
+def validate_feedback_source(schema):
+    required = {'SET_FEEDBACK_SOURCE', 'GET_FEEDBACK_SOURCE_STATUS', 'GET_FEEDBACK_SOURCE_VECTOR',
+                'SET_FEEDBACK_FUSION_MOUNT', 'GET_FEEDBACK_FUSION_MOUNT'}
+    commands = {c['command'] for c in schema['commands']}
+    if not required & commands and not any(key in schema for key, *_ in FEEDBACK_CATALOGS):
+        return
+    if not required <= commands:
+        raise ValueError('Incomplete feedback source command family')
+    for key, _, _, names in FEEDBACK_CATALOGS:
+        ids = [0, 1, 2, 255] if key == 'feedback_sources' else list(range(len(names)))
+        values = schema.get(key, [])
+        if [(v.get('id'), v.get('name')) for v in values] != list(zip(ids, names)) or any(type(v.get('id')) is not int for v in values):
+            raise ValueError('Invalid ' + key + ' catalog')
+
+
 def validate_imu_tracking(schema):
     commands = {c["command"] for c in schema.get("commands", [])}
     required = {"SET_IMU_TRACKING", "GET_IMU_TRACKING_STATUS", "GET_IMU_TRACKING_VECTOR", "GET_IMU_TRACKING_CONFIGURATION"}
@@ -61,6 +84,7 @@ def validate_fusion(schema):
 def validate_pwm_frequency(schema):
     validate_fusion(schema)
     validate_imu_tracking(schema)
+    validate_feedback_source(schema)
     values = schema.get('pwm_frequencies', [])
     expected = [(v, 'KHZ_' + str(v // 1000)) for v in (10000, 20000, 25000, 50000, 100000)]
     if [(v.get('id'), v.get('name')) for v in values] != expected or any(type(v.get('id')) is not int for v in values):
@@ -119,7 +143,7 @@ def generate(schema, output, check=False):
         for p in o['properties']:
             types.append(f"    {p['type']} {p['name']}; ///< {p['description']}\n")
         types.append('};\n')
-    for key, name in [('subscription_triggers', 'KinisiSubscriptionTrigger'), ('subscription_deliveries', 'KinisiSubscriptionDelivery')] + [(key, 'Kinisi' + name) for key, name, _, _ in FUSION_CATALOGS + IMU_TRACKING_CATALOGS]:
+    for key, name in [('subscription_triggers', 'KinisiSubscriptionTrigger'), ('subscription_deliveries', 'KinisiSubscriptionDelivery')] + [(key, 'Kinisi' + name) for key, name, _, _ in FUSION_CATALOGS + IMU_TRACKING_CATALOGS + FEEDBACK_CATALOGS]:
         types.append(f'enum class {name} : uint8_t {{\n')
         for item in schema.get(key, []):
             types.append(f"    {item['name']} = {item['id']},\n")
@@ -214,7 +238,7 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
         for p in props:
             target = f'payload + {offset}'
             if p['type'] == 'double':
-                codec = 'writeFusionYaw' if c['command'] in ('SET_FUSION_EXPERIMENT', 'SET_IMU_TRACKING') and p['name'] == 'mounting_yaw_rad' else 'writeDouble'
+                codec = 'writeFusionYaw' if c['command'] in ('SET_FUSION_EXPERIMENT', 'SET_IMU_TRACKING', 'SET_FEEDBACK_FUSION_MOUNT') and p['name'] == 'mounting_yaw_rad' else 'writeDouble'
                 source.append(f'    kinisi_codec::{codec}({target}, {p["name"]});\n')
             else:
                 source.append(f'    kinisi_codec::writeUnsigned({target}, static_cast<uint64_t>({p["name"]}), {size(p["type"])});\n')
@@ -232,6 +256,42 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
             source.append('    return result;\n}\n')
         else:
             source.append(f'    return request(KINISI_{c["command"]}, payload, {n}, nullptr, 0);\n}}\n')
+    if schema.get('feedback_sources'):
+        types.append('enum class KinisiFeedbackRead : uint8_t { VALID, UNAVAILABLE, CHANGED, ERROR };\n')
+        header.append('    /** Return a bracketed sample, or clear both vectors on loss, turnover or transport failure. */\n')
+        header.append('    KinisiFeedbackRead readFeedbackSourceSnapshot(feedback_source_status& status, feedback_source_vector& pose, feedback_source_vector& twist);\n')
+        source.append("""
+KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_status& status,
+        feedback_source_vector& pose, feedback_source_vector& twist) {
+    status = {}; pose = {}; twist = {};
+    for (uint8_t attempt = 0; attempt < 3; ++attempt) {
+        const auto first = get_feedback_source_status();
+        if (lastError().failure != KinisiFailure::NONE) return KinisiFeedbackRead::ERROR;
+        if (!first.valid) { status = first; return KinisiFeedbackRead::UNAVAILABLE; }
+        const auto position = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::POSE);
+        bool have_vectors = lastError().failure == KinisiFailure::NONE;
+        if (!have_vectors && lastError().code != KinisiErrorCode::SAMPLE_NOT_AVAILABLE) return KinisiFeedbackRead::ERROR;
+        feedback_source_vector velocity{};
+        if (have_vectors) {
+            velocity = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::TWIST);
+            have_vectors = lastError().failure == KinisiFailure::NONE;
+            if (!have_vectors && lastError().code != KinisiErrorCode::SAMPLE_NOT_AVAILABLE) return KinisiFeedbackRead::ERROR;
+        }
+        const auto last = get_feedback_source_status();
+        if (lastError().failure != KinisiFailure::NONE) return KinisiFeedbackRead::ERROR;
+        if (!last.valid) { status = last; return KinisiFeedbackRead::UNAVAILABLE; }
+        if (have_vectors && first.requested == last.requested && first.active == last.active &&
+            first.sequence == last.sequence && first.origin_id == last.origin_id && first.timestamp_us == last.timestamp_us &&
+            position.sequence == last.sequence && velocity.sequence == last.sequence) {
+            status = last; pose = position; twist = velocity;
+            return KinisiFeedbackRead::VALID;
+        }
+    }
+    return KinisiFeedbackRead::CHANGED;
+}
+""")
+        header.append('    bool set_feedback_source(KinisiFeedbackSource source) { return set_feedback_source(static_cast<uint8_t>(source)); }\n')
+        header.append('    feedback_source_vector get_feedback_source_vector(KinisiFeedbackSourceVectorKind kind) { return get_feedback_source_vector(static_cast<uint8_t>(kind)); }\n')
     if schema.get('imu_tracking_actions'):
         header.append('    bool set_imu_tracking(KinisiImuTrackingAction action, uint8_t confirmed, double yaw) { return set_imu_tracking(static_cast<uint8_t>(action), confirmed, yaw); }\n')
         header.append('    imu_tracking_vector get_imu_tracking_vector(KinisiImuTrackingVectorKind kind) { return get_imu_tracking_vector(static_cast<uint8_t>(kind)); }\n')

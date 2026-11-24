@@ -97,6 +97,11 @@ static const uint8_t KINISI_SET_IMU_TRACKING = 0x63;
 static const uint8_t KINISI_GET_IMU_TRACKING_STATUS = 0x64;
 static const uint8_t KINISI_GET_IMU_TRACKING_VECTOR = 0x65;
 static const uint8_t KINISI_GET_IMU_TRACKING_CONFIGURATION = 0x66;
+static const uint8_t KINISI_SET_FEEDBACK_SOURCE = 0x67;
+static const uint8_t KINISI_GET_FEEDBACK_SOURCE_STATUS = 0x68;
+static const uint8_t KINISI_GET_FEEDBACK_SOURCE_VECTOR = 0x69;
+static const uint8_t KINISI_SET_FEEDBACK_FUSION_MOUNT = 0x6a;
+static const uint8_t KINISI_GET_FEEDBACK_FUSION_MOUNT = 0x6b;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -121,6 +126,7 @@ enum class KinisiErrorCode : uint8_t {
     SAMPLE_OUT_OF_RANGE = 18, // The sensor reading is saturated; no valid measurement can be returned.
     DRIVERS_ASLEEP = 19, // Driver sleep is active. Explicitly wake the drivers before requesting this operation.
     BOARD_IDLE = 20, // Board idle is active. Explicitly wake the board before changing driver sleep or starting a subscription.
+    SOURCE_SWITCH_UNSAFE = 21, // Stop all motor outputs, disarm all controllers and wait for stationary wheel observations before changing the tracking preference.
 };
 
 /** The state of the controller for the specified motor. */
@@ -323,6 +329,33 @@ struct imu_tracking_configuration {
     double mounting_yaw_rad; ///< Declared supported mounting yaw in radians.
     uint32_t window_us; ///< Actual source tracking horizon in microseconds; 1000000 for this v0.4 release. Eligible source times are [origin, origin + window_us).
 };
+
+/** Board-wide selected tracking telemetry status. */
+struct feedback_source_status {
+    uint8_t requested; ///< Requested FeedbackSource.
+    uint8_t active; ///< Active FeedbackSource, NONE while invalid.
+    uint8_t valid; ///< One when a current source snapshot is available, otherwise zero.
+    uint8_t reason; ///< FeedbackSourceReason.
+    uint32_t sequence; ///< Underlying sample sequence when valid; zero when invalid.
+    uint64_t timestamp_us; ///< Underlying monotonic board sample time; zero when invalid.
+    uint32_t origin_id; ///< Board-local frame generation. Discard prior coordinates on change or board reboot.
+    uint8_t source_detail; ///< Native IMU tracking or fusion fault code for the requested source; zero otherwise.
+    uint32_t age_us; ///< Board-clock sample age in microseconds; UINT32_MAX when unavailable.
+};
+
+/** Selected source vector in the selector pose frame or native body twist frame. */
+struct feedback_source_vector {
+    uint32_t sequence; ///< Underlying producer sequence. Bracket with status reads.
+    double x; ///< X coordinate or body X velocity.
+    double y; ///< Y coordinate or body Y velocity.
+    double z; ///< Continuous relative yaw or body yaw rate.
+};
+
+/** Passive tracking mount, independent of chassis control. */
+struct feedback_fusion_mount {
+    uint8_t confirmed; ///< One after an explicit mount declaration this boot.
+    double mounting_yaw_rad; ///< Angle of board +X in chassis XY, counterclockwise about +Z in radians. Rigid, level, centered board with +Z up.
+};
 enum class KinisiSubscriptionTrigger : uint8_t {
     PERIODIC = 0,
     ON_EVENT = 1,
@@ -403,6 +436,28 @@ enum class KinisiImuTrackingVectorKind : uint8_t {
     TWIST = 1,
     BIAS = 2,
 };
+enum class KinisiFeedbackSource : uint8_t {
+    ENCODER = 0,
+    IMU_ONLY = 1,
+    FUSED = 2,
+    NONE = 255,
+};
+enum class KinisiFeedbackSourceReason : uint8_t {
+    OK = 0,
+    NOT_STARTED = 1,
+    CALIBRATING = 2,
+    UNAVAILABLE = 3,
+    STALE = 4,
+    EXPIRED = 5,
+    FAULT = 6,
+    INHIBITED = 7,
+    WAITING_SAMPLE = 8,
+    MOUNT_REQUIRED = 9,
+};
+enum class KinisiFeedbackSourceVectorKind : uint8_t {
+    POSE = 0,
+    TWIST = 1,
+};
 enum class KinisiPwmFrequency : uint32_t {
     KHZ_10 = 10000UL,
     KHZ_20 = 20000UL,
@@ -445,3 +500,4 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
 bool kinisiPwmFrequencyValid(uint32_t frequency);
 #endif
 bool kinisiTopicEventSupported(KinisiTopic topic);
+enum class KinisiFeedbackRead : uint8_t { VALID, UNAVAILABLE, CHANGED, ERROR };

@@ -34,8 +34,10 @@ def validate(bundle):
                (('power',) if 'power' in profile else ()) +
                (('capabilities',) if 'capabilities' in profile else ()), 'board profile')
         if 'capabilities' in profile:
-            fields(profile['capabilities'], ('fusion_experiment',) + (('imu_tracking',) if 'imu_tracking' in profile['capabilities'] else ()), 'capabilities')
+            fields(profile['capabilities'], ('fusion_experiment',) + tuple(key for key in ('imu_tracking', 'feedback_source_selector') if key in profile['capabilities']), 'capabilities')
             require(type(profile['capabilities']['fusion_experiment']) is bool, 'Invalid fusion capability')
+            if 'feedback_source_selector' in profile['capabilities']:
+                require(type(profile['capabilities']['feedback_source_selector']) is bool, 'Invalid feedback source selector capability')
             if 'imu_tracking' in profile['capabilities']:
                 require(type(profile['capabilities']['imu_tracking']) is bool, 'Invalid IMU tracking capability')
         if 'power' in profile:
@@ -107,7 +109,7 @@ def generate(bundle):
 enum class KinisiSensor : uint8_t { TEMPERATURE, IMU };
 struct KinisiBoardResources { uint8_t motors, encoders, gpio, status_leds; };
 struct KinisiPowerCapabilities { bool driver_sleep; bool board_idle; };
-struct KinisiExperimentCapabilities { bool fusion_experiment; bool imu_tracking; };
+struct KinisiExperimentCapabilities { bool fusion_experiment; bool imu_tracking; bool feedback_source_selector; };
 /** Discrete nominal thresholds in milliamps; count delimits the supported values. */
 struct KinisiCurrentLimitOptions { uint8_t threshold_count; uint16_t supported_thresholds_ma[THRESHOLD_CAPACITY]; bool can_disable; };
 struct KinisiPwmFrequencyOptions { uint32_t default_hz; uint8_t frequency_count; uint32_t supported_hz[PWM_CAPACITY]; };
@@ -176,7 +178,7 @@ const KinisiBoardProfile profiles[] KINISI_PROFILE_STORAGE = {
         pwm_value = '{' + f"{pwm.get('default_hz', 0)}UL, {len(frequencies)}, {{{', '.join(str(v) + 'UL' for v in frequencies) or '0'}}}" + '}'
         power_value = '{' + ', '.join(str(board.get('power', {}).get(key, False)).lower() for key in ('driver_sleep', 'board_idle')) + '}'
         source += (f'    {{{model}, {revision}, {{{counts}}}, {pwm_value}, {{{motor_values}}}, '
-                   f'{len(temp)}, {{{temp_values}}}, {len(imu)}, {{{imu_values}}}, {power_value}, {{{str(board.get('capabilities', {}).get('fusion_experiment', False)).lower()}, {str(board.get('capabilities', {}).get('imu_tracking', False)).lower()}}}}},\n')
+                   f'{len(temp)}, {{{temp_values}}}, {len(imu)}, {{{imu_values}}}, {power_value}, {{{str(board.get('capabilities', {}).get('fusion_experiment', False)).lower()}, {str(board.get('capabilities', {}).get('imu_tracking', False)).lower()}, {str(board.get('capabilities', {}).get('feedback_source_selector', False)).lower()}}}}},\n')
     source += '''};
 }
 
