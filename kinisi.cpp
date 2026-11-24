@@ -954,8 +954,8 @@ bool KinisiController::set_feedback_source(uint8_t source) {
 feedback_source_status KinisiController::get_feedback_source_status() {
     uint8_t payload[1] = {0};
     feedback_source_status result = {};
-    uint8_t response[25] = {0};
-    if (!request(KINISI_GET_FEEDBACK_SOURCE_STATUS, payload, 0, response, 25)) return result;
+    uint8_t response[27] = {0};
+    if (!request(KINISI_GET_FEEDBACK_SOURCE_STATUS, payload, 0, response, 27)) return result;
     result.requested = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 0, 1));
     result.active = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 1, 1));
     result.valid = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 2, 1));
@@ -965,16 +965,19 @@ feedback_source_status KinisiController::get_feedback_source_status() {
     result.origin_id = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 16, 4));
     result.source_detail = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 20, 1));
     result.age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 21, 4));
+    result.max_age_ms = static_cast<uint16_t>(kinisi_codec::readUnsigned(response + 25, 2));
     return result;
 }
 
 /** Encode GET_FEEDBACK_SOURCE_VECTOR, match its reply, and decode the payload. */
-feedback_source_vector KinisiController::get_feedback_source_vector(uint8_t kind) {
-    uint8_t payload[1] = {0};
+feedback_source_vector KinisiController::get_feedback_source_vector(uint8_t kind, uint32_t origin_id, uint32_t sequence) {
+    uint8_t payload[9] = {0};
     kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(kind), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(origin_id), 4);
+    kinisi_codec::writeUnsigned(payload + 5, static_cast<uint64_t>(sequence), 4);
     feedback_source_vector result = {};
     uint8_t response[28] = {0};
-    if (!request(KINISI_GET_FEEDBACK_SOURCE_VECTOR, payload, 1, response, 28)) return result;
+    if (!request(KINISI_GET_FEEDBACK_SOURCE_VECTOR, payload, 9, response, 28)) return result;
     result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 0, 4));
     result.x = kinisi_codec::readDouble(response + 4);
     result.y = kinisi_codec::readDouble(response + 12);
@@ -1007,22 +1010,29 @@ KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_
         const auto first = get_feedback_source_status();
         if (lastError().failure != KinisiFailure::NONE) return KinisiFeedbackRead::ERROR;
         if (!first.valid) { status = first; return KinisiFeedbackRead::UNAVAILABLE; }
-        const auto position = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::POSE);
+        const auto position = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::POSE, first.origin_id, first.sequence);
         bool have_vectors = lastError().failure == KinisiFailure::NONE;
         if (!have_vectors && lastError().code != KinisiErrorCode::SAMPLE_NOT_AVAILABLE) return KinisiFeedbackRead::ERROR;
         feedback_source_vector velocity{};
         if (have_vectors) {
-            velocity = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::TWIST);
+            velocity = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::TWIST, first.origin_id, first.sequence);
             have_vectors = lastError().failure == KinisiFailure::NONE;
             if (!have_vectors && lastError().code != KinisiErrorCode::SAMPLE_NOT_AVAILABLE) return KinisiFeedbackRead::ERROR;
         }
         const auto last = get_feedback_source_status();
         if (lastError().failure != KinisiFailure::NONE) return KinisiFeedbackRead::ERROR;
         if (!last.valid) { status = last; return KinisiFeedbackRead::UNAVAILABLE; }
-        if (have_vectors && first.requested == last.requested && first.active == last.active &&
-            first.sequence == last.sequence && first.origin_id == last.origin_id && first.timestamp_us == last.timestamp_us &&
-            position.sequence == last.sequence && velocity.sequence == last.sequence) {
-            status = last; pose = position; twist = velocity;
+        if (!have_vectors || position.sequence != first.sequence || velocity.sequence != first.sequence ||
+            first.requested != last.requested || first.active != last.active || first.origin_id != last.origin_id) continue;
+        const uint32_t advance = last.sequence - first.sequence;
+        if (advance >= UINT32_C(0x80000000) || last.timestamp_us < first.timestamp_us) continue;
+        const uint64_t tick = last.timestamp_us - first.timestamp_us;
+        if (tick > UINT32_MAX || (advance == 0) != (tick == 0)) continue;
+        const uint64_t age = tick + last.age_us;
+        const uint16_t limit_ms = first.max_age_ms < last.max_age_ms ? first.max_age_ms : last.max_age_ms;
+        if (age >= first.age_us && age - first.age_us <= 50000 && age <= uint32_t(limit_ms) * 1000UL) {
+            status = first; status.age_us = static_cast<uint32_t>(age);
+            pose = position; twist = velocity;
             return KinisiFeedbackRead::VALID;
         }
     }

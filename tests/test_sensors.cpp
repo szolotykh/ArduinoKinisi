@@ -747,7 +747,12 @@ static void feedback_source_selector() {
     assert(!c.supportsFeedbackSourceSelector());
     assert(c.begin(1000, 0) && c.supportsFeedbackSourceSelector());
     uint8_t source = 0;
-    uint32_t origin = 3;
+    uint32_t origin = 3, sequence = 42, captured_age = 937, confirmed_age = 937;
+    uint64_t stamp = (UINT64_C(1)<<60)+7;
+    uint32_t next_sequence = 42;
+    int32_t tick = 0;
+    uint16_t limit_override = 0;
+    unsigned reads = 0;
     bool changing = false, expired = false, unsafe = false, malformed = false;
     auto count = Wire.transactions;
     Wire.responder = [&](const std::vector<uint8_t>& request) {
@@ -755,16 +760,20 @@ static void feedback_source_selector() {
         const uint16_t id = request[2] | uint16_t(request[3]) << 8;
         std::vector<uint8_t> data;
         if (cmd == KINISI_GET_FEEDBACK_SOURCE_STATUS) {
-            data.resize(25);
+            data.resize(27);
+            const bool confirming = ++reads % 2 == 0;
             data[0] = source; data[1] = expired ? 255 : source; data[2] = expired ? 0 : 1;
             data[3] = malformed ? 11 : expired ? 5 : 0;
-            kinisi_codec::writeUnsigned(data.data()+4, expired ? 0 : 42, 4);
-            kinisi_codec::writeUnsigned(data.data()+8, expired ? 0 : (UINT64_C(1)<<60)+7, 8);
+            kinisi_codec::writeUnsigned(data.data()+4, expired ? 0 : confirming ? next_sequence : sequence, 4);
+            kinisi_codec::writeUnsigned(data.data()+8, expired ? 0 : confirming ? stamp + tick : stamp, 8);
             kinisi_codec::writeUnsigned(data.data()+16, changing ? ++origin : origin, 4);
-            kinisi_codec::writeUnsigned(data.data()+21, expired ? UINT32_MAX : 937, 4);
+            kinisi_codec::writeUnsigned(data.data()+21, expired ? UINT32_MAX : confirming ? confirmed_age : captured_age, 4);
+            const uint16_t max_age = source == 0 ? 300 : source == 1 ? 50 : 60;
+            kinisi_codec::writeUnsigned(data.data()+25, confirming && limit_override ? limit_override : max_age, 2);
         } else if (cmd == KINISI_GET_FEEDBACK_SOURCE_VECTOR) {
-            assert(request.size() == 5 && request[4] < 2);
-            data.resize(28); kinisi_codec::writeUnsigned(data.data(), 42, 4);
+            assert(request.size() == 13 && request[4] < 2);
+            assert(kinisi_codec::readUnsigned(request.data()+5, 4) == origin && kinisi_codec::readUnsigned(request.data()+9, 4) == sequence);
+            data.resize(28); kinisi_codec::writeUnsigned(data.data(), sequence, 4);
             kinisi_codec::writeDouble(data.data()+4, request[4] == 0 ? 1.25 : -0.5);
         } else if (cmd == KINISI_SET_FEEDBACK_SOURCE && unsafe) {
             Wire.responses.push_back(frame(KINISI_ERROR, id, {cmd, uint8_t(KinisiErrorCode::SOURCE_SWITCH_UNSAFE)}));
@@ -789,14 +798,30 @@ static void feedback_source_selector() {
     assert(c.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::CHANGED);
     assert(pose.x == 0 && twist.x == 0 && !status.valid);
     assert(Wire.transactions == count + 24);
-    changing = false; expired = true;
+    changing = false;
+    sequence = UINT32_MAX; next_sequence = 0; tick = 10000;
+    for (source = 0; source < 3; ++source) {
+        captured_age = confirmed_age = source == 0 ? 150000 : 1000;
+        assert(c.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::VALID);
+        assert(status.sequence == sequence && status.timestamp_us == stamp && status.age_us == captured_age + 10000);
+    }
+    sequence = 42;
+    struct BoundsCase { uint8_t source; uint32_t first_age; int32_t delta; uint32_t last_age, seq; uint16_t max_age; };
+    const BoundsCase rejected[] = {{1,40000,12000,40000,43,50}, {0,150000,60000,150000,43,300},
+        {0,50000,12000,49500,43,60}, {2,1000,-1,1000,43,60}, {2,1000,1000,1000,41,60}};
+    for (const auto& trial : rejected) {
+        source = trial.source; captured_age = trial.first_age; tick = trial.delta;
+        confirmed_age = trial.last_age; next_sequence = trial.seq; limit_override = trial.max_age;
+        assert(c.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::CHANGED);
+    }
+    source = 2; expired = true;
     assert(c.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::UNAVAILABLE);
     assert(!status.valid && status.active == 255 && status.reason == 5 && status.age_us == UINT32_MAX);
     unsafe = true; count = Wire.transactions;
     assert(!c.set_feedback_source(KinisiFeedbackSource::IMU_ONLY) && c.lastError().code == KinisiErrorCode::SOURCE_SWITCH_UNSAFE);
     assert(Wire.transactions == count + 1 && c.ready());
     assert(!c.set_feedback_source(KinisiFeedbackSource::NONE));
-    c.get_feedback_source_vector(2);
+    c.get_feedback_source_vector(2, 3, 42);
     assert(!c.set_feedback_fusion_mount(NAN) && !c.set_feedback_fusion_mount(INFINITY));
     assert(Wire.transactions == count + 1 && c.lastError().failure == KinisiFailure::INVALID_ARGUMENT);
     assert(c.set_feedback_fusion_mount(-3.141592653589793));
@@ -808,7 +833,7 @@ static void feedback_source_selector() {
         reset(minor, minor == 4 ? 20 : 21);
         assert(c.begin(1000, 0) && !c.supportsFeedbackSourceSelector());
         count = Wire.transactions;
-        assert(!c.set_feedback_source(0)); c.get_feedback_source_status(); c.get_feedback_source_vector(0);
+        assert(!c.set_feedback_source(0)); c.get_feedback_source_status(); c.get_feedback_source_vector(0, 3, 42);
         assert(!c.set_feedback_fusion_mount(0)); c.get_feedback_fusion_mount();
         assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == count);
     }

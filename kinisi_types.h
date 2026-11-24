@@ -341,11 +341,12 @@ struct feedback_source_status {
     uint32_t origin_id; ///< Board-local frame generation. Discard prior coordinates on change or board reboot.
     uint8_t source_detail; ///< Native IMU tracking or fusion fault code for the requested source; zero otherwise.
     uint32_t age_us; ///< Board-clock sample age in microseconds; UINT32_MAX when unavailable.
+    uint16_t max_age_ms; ///< Maximum eligible captured sample age in milliseconds for this source, including the configured encoder period. Compare updated original sample age with the smaller of its captured and current limits.
 };
 
 /** Selected source vector in the selector pose frame or native body twist frame. */
 struct feedback_source_vector {
-    uint32_t sequence; ///< Underlying producer sequence. Bracket with status reads.
+    uint32_t sequence; ///< Exact producer sequence captured by status and requested by the vector command.
     double x; ///< X coordinate or body X velocity.
     double y; ///< Y coordinate or body Y velocity.
     double z; ///< Continuous relative yaw or body yaw rate.

@@ -268,22 +268,29 @@ KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_
         const auto first = get_feedback_source_status();
         if (lastError().failure != KinisiFailure::NONE) return KinisiFeedbackRead::ERROR;
         if (!first.valid) { status = first; return KinisiFeedbackRead::UNAVAILABLE; }
-        const auto position = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::POSE);
+        const auto position = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::POSE, first.origin_id, first.sequence);
         bool have_vectors = lastError().failure == KinisiFailure::NONE;
         if (!have_vectors && lastError().code != KinisiErrorCode::SAMPLE_NOT_AVAILABLE) return KinisiFeedbackRead::ERROR;
         feedback_source_vector velocity{};
         if (have_vectors) {
-            velocity = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::TWIST);
+            velocity = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::TWIST, first.origin_id, first.sequence);
             have_vectors = lastError().failure == KinisiFailure::NONE;
             if (!have_vectors && lastError().code != KinisiErrorCode::SAMPLE_NOT_AVAILABLE) return KinisiFeedbackRead::ERROR;
         }
         const auto last = get_feedback_source_status();
         if (lastError().failure != KinisiFailure::NONE) return KinisiFeedbackRead::ERROR;
         if (!last.valid) { status = last; return KinisiFeedbackRead::UNAVAILABLE; }
-        if (have_vectors && first.requested == last.requested && first.active == last.active &&
-            first.sequence == last.sequence && first.origin_id == last.origin_id && first.timestamp_us == last.timestamp_us &&
-            position.sequence == last.sequence && velocity.sequence == last.sequence) {
-            status = last; pose = position; twist = velocity;
+        if (!have_vectors || position.sequence != first.sequence || velocity.sequence != first.sequence ||
+            first.requested != last.requested || first.active != last.active || first.origin_id != last.origin_id) continue;
+        const uint32_t advance = last.sequence - first.sequence;
+        if (advance >= UINT32_C(0x80000000) || last.timestamp_us < first.timestamp_us) continue;
+        const uint64_t tick = last.timestamp_us - first.timestamp_us;
+        if (tick > UINT32_MAX || (advance == 0) != (tick == 0)) continue;
+        const uint64_t age = tick + last.age_us;
+        const uint16_t limit_ms = first.max_age_ms < last.max_age_ms ? first.max_age_ms : last.max_age_ms;
+        if (age >= first.age_us && age - first.age_us <= 50000 && age <= uint32_t(limit_ms) * 1000UL) {
+            status = first; status.age_us = static_cast<uint32_t>(age);
+            pose = position; twist = velocity;
             return KinisiFeedbackRead::VALID;
         }
     }
@@ -291,7 +298,7 @@ KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_
 }
 """)
         header.append('    bool set_feedback_source(KinisiFeedbackSource source) { return set_feedback_source(static_cast<uint8_t>(source)); }\n')
-        header.append('    feedback_source_vector get_feedback_source_vector(KinisiFeedbackSourceVectorKind kind) { return get_feedback_source_vector(static_cast<uint8_t>(kind)); }\n')
+        header.append('    feedback_source_vector get_feedback_source_vector(KinisiFeedbackSourceVectorKind kind, uint32_t origin_id, uint32_t sequence) { return get_feedback_source_vector(static_cast<uint8_t>(kind), origin_id, sequence); }\n')
     if schema.get('imu_tracking_actions'):
         header.append('    bool set_imu_tracking(KinisiImuTrackingAction action, uint8_t confirmed, double yaw) { return set_imu_tracking(static_cast<uint8_t>(action), confirmed, yaw); }\n')
         header.append('    imu_tracking_vector get_imu_tracking_vector(KinisiImuTrackingVectorKind kind) { return get_imu_tracking_vector(static_cast<uint8_t>(kind)); }\n')
