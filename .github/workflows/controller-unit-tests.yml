@@ -1,0 +1,44 @@
+name: Arduino pre-merge tests
+
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Controller unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CC: gcc
+      CXX: g++
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: ArduinoKinisi
+          persist-credentials: false
+
+      - name: Check out matching firmware for interoperability
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: szolotykh/kinisi-motor-controller-firmware
+          ref: 552c8b360bbcd86df13ecb02c406102dc7760177
+          path: kinisi-motor-controller-firmware
+          persist-credentials: false
+
+      - name: Test SDK, generated profiles, examples and firmware session
+        working-directory: ArduinoKinisi
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v "$CC"
+          command -v "$CXX"
+          test -s ../kinisi-motor-controller-firmware/include/board_profiles.json
+          test -s ../kinisi-motor-controller-firmware/lib/connection/connection.c
+          log="$RUNNER_TEMP/arduino-unit-tests.log"
+          python3 -u tests/run_tests.py | tee "$log"
+          grep -Fqx 'PASS Arduino SDK interoperates with production C firmware INIT, READY, ACK, ERROR and clock status' "$log"
