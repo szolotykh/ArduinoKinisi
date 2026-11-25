@@ -839,7 +839,124 @@ static void feedback_source_selector() {
     }
 }
 
+static void feedback_health() {
+    reset(4, 22);
+    KinisiController c;
+    assert(!c.supportsFeedbackSourceHealth() && !c.supportsFeedbackImuChannels());
+    assert(c.begin(1000, 0));
+    assert(c.supportsFeedbackSourceHealth() == (KINISI_WIRE_BUFFER_SIZE >= 32));
+    assert(c.supportsFeedbackImuChannels() == (KINISI_WIRE_BUFFER_SIZE >= 28));
+    const uint64_t stamp = (UINT64_C(1) << 60) + 33;
+    uint8_t expected = KINISI_GET_FEEDBACK_IMU_CHANNELS, source = 1;
+    bool device_error = false;
+    std::vector<uint8_t> data(24);
+    Wire.responder = [&](const std::vector<uint8_t>& r) {
+        assert(r[1] == expected && r.size() == (expected == KINISI_GET_FEEDBACK_IMU_CHANNELS ? 4U : 5U));
+        if (expected == KINISI_GET_FEEDBACK_SOURCE_HEALTH) assert(r[4] == source);
+        const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+        Wire.responses.push_back(device_error ? frame(KINISI_ERROR, id, {expected, uint8_t(KinisiErrorCode::SENSOR_NOT_AVAILABLE)}) :
+                                 frame(expected, id, data));
+    };
+    auto count = Wire.transactions;
+    if (c.supportsFeedbackImuChannels()) {
+        kinisi_codec::writeUnsigned(data.data(), stamp, 8);
+        kinisi_codec::writeUnsigned(data.data() + 16, 41000, 4);
+        kinisi_codec::writeUnsigned(data.data() + 20, UINT32_MAX, 4);
+        auto channels = c.get_feedback_imu_channels();
+        assert(c.lastError().failure == KinisiFailure::NONE && channels.accel_timestamp_us == stamp);
+        assert(channels.gyro_timestamp_us == 0 && channels.gyro_age_us == UINT32_MAX && channels.accel_age_us == 41000);
+        kinisi_codec::writeUnsigned(data.data() + 8, stamp + 2500, 8);
+        kinisi_codec::writeUnsigned(data.data() + 16, 2600, 4);
+        kinisi_codec::writeUnsigned(data.data() + 20, 100, 4);
+        channels = c.get_feedback_imu_channels();
+        assert(channels.gyro_timestamp_us == stamp + 2500 && channels.accel_age_us == 2600 && channels.gyro_age_us == 100);
+    } else {
+        const auto missing = c.get_feedback_imu_channels();
+        assert(missing.accel_timestamp_us == 0 && missing.gyro_timestamp_us == 0);
+        assert(missing.accel_age_us == UINT32_MAX && missing.gyro_age_us == UINT32_MAX);
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == count);
+    }
+
+    expected = KINISI_GET_FEEDBACK_SOURCE_HEALTH;
+    count = Wire.transactions;
+    if (c.supportsFeedbackSourceHealth()) {
+        data.assign(28, 0);
+        struct Record { uint8_t src, state, reason, detail; uint32_t flags, seq; uint64_t stamp; uint32_t age, limit; };
+        const Record records[] = {
+            {0,0,0,0,3,90,stamp,100,300000}, {2,2,9,1,0,0,0,UINT32_MAX,60000},
+            {1,3,0,0,15,42,stamp,200,35000}, {1,1,6,6,131,42,stamp,2100,35000},
+            {1,2,4,4,65,42,stamp,80000,35000}, {1,1,8,0,19,43,stamp+100000,300,35000},
+            {1,0,0,0,UINT32_C(0x80000003),44,stamp+110000,200,35000}
+        };
+        for (const Record& row : records) {
+            source = row.src;
+            data[0] = source; data[1] = row.state; data[2] = row.reason; data[3] = row.detail;
+            kinisi_codec::writeUnsigned(data.data()+4, row.flags, 4);
+            kinisi_codec::writeUnsigned(data.data()+8, row.seq, 4);
+            kinisi_codec::writeUnsigned(data.data()+12, row.stamp, 8);
+            kinisi_codec::writeUnsigned(data.data()+20, row.age, 4);
+            kinisi_codec::writeUnsigned(data.data()+24, row.limit, 4);
+            const auto result = c.get_feedback_source_health(static_cast<KinisiFeedbackSource>(source));
+            assert(c.lastError().failure == KinisiFailure::NONE && result.source == source && result.health == row.state);
+            assert(result.reason == row.reason && result.detail == row.detail && result.flags == row.flags);
+            assert(result.sequence == row.seq && result.timestamp_us == row.stamp && result.age_us == row.age && result.max_age_us == row.limit);
+        }
+        assert(static_cast<uint32_t>(KinisiFeedbackSourceHealthFlag::SATURATION) == 128);
+        assert(static_cast<uint8_t>(KinisiFeedbackSourceHealthState::INDETERMINATE) == 3);
+        const auto health_responder = Wire.responder;
+        auto reconnect = [&]() {
+            reset(4, 22);
+            assert(c.begin(1000, 0));
+            Wire.responder = health_responder;
+        };
+        for (uint8_t index = 0; index < 4; ++index) {
+            const uint8_t saved = data[index];
+            data[index] = 255;
+            const auto missing = c.get_feedback_source_health(source);
+            assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+            assert(missing.source == source && missing.health == 2 && missing.reason == 3 && missing.flags == 0);
+            assert(missing.age_us == UINT32_MAX && missing.timestamp_us == 0);
+            data[index] = saved;
+            reconnect();
+        }
+        data.pop_back();
+        c.get_feedback_source_health(source);
+        assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+        reconnect();
+        Wire.nack = true;
+        const auto failed = c.get_feedback_source_health(source);
+        assert(c.lastError().failure == KinisiFailure::TRANSPORT && failed.source == source && failed.health == 2 && failed.age_us == UINT32_MAX);
+        reconnect();
+        Wire.nack = true;
+        const auto absent = c.get_feedback_imu_channels();
+        assert(c.lastError().failure == KinisiFailure::TRANSPORT && absent.accel_age_us == UINT32_MAX && absent.gyro_age_us == UINT32_MAX);
+        reconnect();
+        device_error = true;
+        c.get_feedback_source_health(source);
+        assert(c.lastError().code == KinisiErrorCode::SENSOR_NOT_AVAILABLE);
+        count = Wire.transactions;
+        c.get_feedback_source_health(KinisiFeedbackSource::NONE);
+        assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == count);
+    } else {
+        const auto missing = c.get_feedback_source_health(KinisiFeedbackSource::IMU_ONLY);
+        assert(missing.source == 1 && missing.health == 2 && missing.reason == 3 && missing.flags == 0);
+        assert(missing.age_us == UINT32_MAX && missing.timestamp_us == 0);
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == count);
+    }
+    struct Board { uint8_t revision, minor, patch; };
+    const Board boards[] = {{4,21,0}, {3,22,0}, {4,22,1}};
+    for (const Board& board : boards) {
+        reset(board.revision, board.minor, board.patch);
+        assert(c.begin(1000,0) && !c.supportsFeedbackSourceHealth() && !c.supportsFeedbackImuChannels());
+        count = Wire.transactions;
+        c.get_feedback_source_health(KinisiFeedbackSource::FUSED);
+        c.get_feedback_imu_channels();
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == count);
+    }
+}
+
 int main() {
+    feedback_health();
     if (KINISI_WIRE_BUFFER_SIZE < 32) {
         reset(4, 21);
         KinisiController controller;

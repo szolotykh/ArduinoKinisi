@@ -72,7 +72,7 @@ direct reads on those boards rely on firmware availability errors.
 | `get_motor_current(uint8_t motor_index)` | 2.7+ | 12 bytes | Amperes `double` |
 | `get_motor_faults(uint8_t motor_index)` | 2.8+ | 14 bytes | `motor_fault_status` |
 
-`imu_sample` has `acceleration_x`, `acceleration_y`, `acceleration_z` in m/s² and
+`imu_sample` has `acceleration_x`, `acceleration_y`, `acceleration_z` in m/sÃ‚Â² and
 `angular_velocity_x`, `angular_velocity_y`, `angular_velocity_z` in rad/s.
 Acceleration includes gravity; readings use native sensor axes. Accelerometer
 and gyroscope samples are independent, without calibration, orientation or fusion.
@@ -448,3 +448,24 @@ board-reported invalid status. `CHANGED` means three successive reads could not
 establish a common sample. `ERROR` preserves the transport or controller failure in
 `lastError()`. Vectors are cleared on every result other than `VALID`. A failed write
 requires explicit readback before deciding whether to retry.
+
+## Feedback source health
+
+On a READY model 1 v0.4.0 board running protocol 2.22 or later in the 2.x series, read the encoder batch, physical BMI088 pair, or passive fused estimate by source. Each read returns the board's current health, reason, native fusion fault detail, flags, sequence, acquisition timestamp, age and maximum age. Reads work independently of the selected source and leave the motion state untouched. The physical BMI088 may remain healthy after the separate finite IMU tracking estimate expires.
+
+```cpp
+if (controller.supportsFeedbackSourceHealth()) {
+    const auto imu = controller.get_feedback_source_health(KinisiFeedbackSource::IMU_ONLY);
+    if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(imu.health);
+}
+if (controller.supportsFeedbackImuChannels()) {
+    const auto channels = controller.get_feedback_imu_channels();
+    if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(channels.gyro_age_us);
+}
+```
+
+Timestamps and ages use board-clock microseconds. A source can retain its last timestamp and sequence during an outage. An unseen source reports zero timestamp and sequence with age `UINT32_MAX`. The separate channel read gives the latest accelerometer and gyro timestamps and ages, including one-sided outages. A usable BMI088 pair must meet the 35,000 Âµs age and 15,000 Âµs skew limits.
+
+Read health and flags together. `FRESH` describes the represented sample's age. `COMPARISON_AVAILABLE` indicates whether the producers can be compared. `DISAGREEMENT` identifies conflicting measurements without assigning blame. A subsequent read returns the board's recovery state and updated provenance.
+
+The health reply needs a 32-byte Wire buffer, including framing. The channel reply fits 28 bytes. Each support method checks the capacity for its own reply. A failed health getter returns the queried source with unavailable health, zero provenance and unknown age. A failed channel getter returns zero timestamps and unknown ages. Check `lastError()` to distinguish a failed transaction from an unavailable producer reported by a successful read.

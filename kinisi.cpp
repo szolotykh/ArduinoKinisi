@@ -1003,6 +1003,44 @@ feedback_fusion_mount KinisiController::get_feedback_fusion_mount() {
     return result;
 }
 
+/** Encode GET_FEEDBACK_SOURCE_HEALTH, match its reply, and decode the payload. */
+feedback_source_health KinisiController::get_feedback_source_health(uint8_t source) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(source), 1);
+    feedback_source_health result = {};
+    uint8_t response[28] = {0};
+    result.source = source;
+    result.health = static_cast<uint8_t>(KinisiFeedbackSourceHealthState::UNAVAILABLE);
+    result.reason = static_cast<uint8_t>(KinisiFeedbackSourceReason::UNAVAILABLE);
+    result.age_us = UINT32_MAX;
+    if (!request(KINISI_GET_FEEDBACK_SOURCE_HEALTH, payload, 1, response, 28)) return result;
+    result.source = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.health = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 1, 1));
+    result.reason = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 2, 1));
+    result.detail = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 3, 1));
+    result.flags = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 4, 4));
+    result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 8, 4));
+    result.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(response + 12, 8));
+    result.age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 20, 4));
+    result.max_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 24, 4));
+    return result;
+}
+
+/** Encode GET_FEEDBACK_IMU_CHANNELS, match its reply, and decode the payload. */
+feedback_imu_channels KinisiController::get_feedback_imu_channels() {
+    uint8_t payload[1] = {0};
+    feedback_imu_channels result = {};
+    uint8_t response[24] = {0};
+    result.accel_age_us = UINT32_MAX;
+    result.gyro_age_us = UINT32_MAX;
+    if (!request(KINISI_GET_FEEDBACK_IMU_CHANNELS, payload, 0, response, 24)) return result;
+    result.accel_timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(response + 0, 8));
+    result.gyro_timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(response + 8, 8));
+    result.accel_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 16, 4));
+    result.gyro_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 20, 4));
+    return result;
+}
+
 KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_status& status,
         feedback_source_vector& pose, feedback_source_vector& twist) {
     status = {}; pose = {}; twist = {};

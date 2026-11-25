@@ -82,6 +82,14 @@ void setup() {
         if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(amps);
         controller.subscribe(KinisiTopic::MOTOR_CURRENT, 0, 100);
     }
+    if (controller.supportsFeedbackSourceHealth()) {
+        const auto health = controller.get_feedback_source_health(KinisiFeedbackSource::IMU_ONLY);
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(health.health);
+    }
+    if (controller.supportsFeedbackImuChannels()) {
+        const auto channels = controller.get_feedback_imu_channels();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(channels.gyro_age_us);
+    }
     if (controller.supportsFeedbackSourceSelector()) {
         feedback_source_status status{};
         feedback_source_vector pose{}, twist{};

@@ -111,3 +111,5 @@ get_feedback_source_status	KEYWORD2
 get_feedback_source_vector	KEYWORD2
 set_feedback_fusion_mount	KEYWORD2
 get_feedback_fusion_mount	KEYWORD2
+get_feedback_source_health	KEYWORD2
+get_feedback_imu_channels	KEYWORD2

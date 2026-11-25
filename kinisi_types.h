@@ -102,6 +102,8 @@ static const uint8_t KINISI_GET_FEEDBACK_SOURCE_STATUS = 0x68;
 static const uint8_t KINISI_GET_FEEDBACK_SOURCE_VECTOR = 0x69;
 static const uint8_t KINISI_SET_FEEDBACK_FUSION_MOUNT = 0x6a;
 static const uint8_t KINISI_GET_FEEDBACK_FUSION_MOUNT = 0x6b;
+static const uint8_t KINISI_GET_FEEDBACK_SOURCE_HEALTH = 0x6c;
+static const uint8_t KINISI_GET_FEEDBACK_IMU_CHANNELS = 0x6d;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -357,6 +359,27 @@ struct feedback_fusion_mount {
     uint8_t confirmed; ///< One after an explicit mount declaration this boot.
     double mounting_yaw_rad; ///< Angle of board +X in chassis XY, counterclockwise about +Z in radians. Rigid, level, centered board with +Z up.
 };
+
+/** Read producer health independently of selector and control. ENCODER is the running platform encoder batch, IMU_ONLY is physical BMI088 pair availability independent of the one-second estimate, FUSED is the passive fused estimate. Disagreement indicates conflicting observations without assigning sensor blame. HEALTHY means directly usable data. Comparability is separate. Historical provenance remains readable during failure. Reconnect reads board state. */
+struct feedback_source_health {
+    uint8_t source; ///< Echo of FeedbackSource request.
+    uint8_t health; ///< FeedbackSourceHealthState.
+    uint8_t reason; ///< FeedbackSourceReason for current producer availability.
+    uint8_t detail; ///< FusionFault explanation if present.
+    uint32_t flags; ///< FeedbackSourceHealthFlag bit mask.
+    uint32_t sequence; ///< Sequence of the last producer publication or observed distinct raw IMU pair, wrapping modulo 2^32; use PROVENANCE for presence.
+    uint64_t timestamp_us; ///< Last usable source time in board uptime microseconds. For the BMI088 pair this is its older die timestamp.
+    uint32_t age_us; ///< Age of that timestamp in board uptime microseconds, UINT32_MAX if absent, future or too old to represent.
+    uint32_t max_age_us; ///< Source freshness budget in microseconds.
+};
+
+/** Read independent last observed accelerometer and gyro acquisition times in board uptime microseconds. A timestamp of zero and age UINT32_MAX indicate no observed acquisition. These are physical source observations, independent of the finite IMU-only tracking window. A pair must meet the 35000 us age and 15000 us skew limits. */
+struct feedback_imu_channels {
+    uint64_t accel_timestamp_us; ///< Last observed accelerometer acquisition time in board uptime microseconds.
+    uint64_t gyro_timestamp_us; ///< Last observed gyro acquisition time in board uptime microseconds.
+    uint32_t accel_age_us; ///< Board-derived acquisition age in microseconds, UINT32_MAX if unknown.
+    uint32_t gyro_age_us; ///< Board-derived acquisition age in microseconds, UINT32_MAX if unknown.
+};
 enum class KinisiSubscriptionTrigger : uint8_t {
     PERIODIC = 0,
     ON_EVENT = 1,
@@ -458,6 +481,22 @@ enum class KinisiFeedbackSourceReason : uint8_t {
 enum class KinisiFeedbackSourceVectorKind : uint8_t {
     POSE = 0,
     TWIST = 1,
+};
+enum class KinisiFeedbackSourceHealthState : uint8_t {
+    HEALTHY = 0,
+    SUSPECT = 1,
+    UNAVAILABLE = 2,
+    INDETERMINATE = 3,
+};
+enum class KinisiFeedbackSourceHealthFlag : uint32_t {
+    PROVENANCE = 1,
+    FRESH = 2,
+    DISAGREEMENT = 4,
+    COMPARISON_AVAILABLE = 8,
+    RECOVERING = 16,
+    RESTART_REQUIRED = 32,
+    TIMESTAMP_FAULT = 64,
+    SATURATION = 128,
 };
 enum class KinisiPwmFrequency : uint32_t {
     KHZ_10 = 10000UL,

@@ -275,10 +275,17 @@ public:
 
     /** Read the explicit volatile passive fusion mounting confirmation and board yaw. Reset clears confirmation. Requires READY, exact v0.4 and protocol 2.21+. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, CLOCK_NOT_READY, SENSOR_NOT_AVAILABLE, INTERNAL_ERROR. Check lastError() after getters; setters return success. */
     feedback_fusion_mount get_feedback_fusion_mount();
+
+    /** Read producer health independently of selector and control. ENCODER is the running platform encoder batch, IMU_ONLY is physical BMI088 pair availability independent of the one-second estimate, FUSED is the passive fused estimate. Disagreement indicates conflicting observations without assigning sensor blame. HEALTHY means directly usable data. Comparability is separate. Historical provenance remains readable during failure. Reconnect reads board state. Requires READY, exact v0.4 and protocol 2.22+ with feedback_source_health. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, CLOCK_NOT_READY, SENSOR_NOT_AVAILABLE, INTERNAL_ERROR. Check lastError() after getters; setters return success. */
+    feedback_source_health get_feedback_source_health(uint8_t source);
+
+    /** Read independent last observed accelerometer and gyro acquisition times in board uptime microseconds. A timestamp of zero and age UINT32_MAX indicate no observed acquisition. These are physical source observations, independent of the finite IMU-only tracking window. A pair must meet the 35000 us age and 15000 us skew limits. Requires READY, exact v0.4 and protocol 2.22+ with feedback_source_health. Errors: INVALID_LENGTH, INVALID_ARGUMENT, INIT_REQUIRED, CLOCK_NOT_READY, SENSOR_NOT_AVAILABLE, INTERNAL_ERROR. Check lastError() after getters; setters return success. */
+    feedback_imu_channels get_feedback_imu_channels();
     /** Return a bracketed sample, or clear both vectors on loss, turnover or transport failure. */
     KinisiFeedbackRead readFeedbackSourceSnapshot(feedback_source_status& status, feedback_source_vector& pose, feedback_source_vector& twist);
     bool set_feedback_source(KinisiFeedbackSource source) { return set_feedback_source(static_cast<uint8_t>(source)); }
     feedback_source_vector get_feedback_source_vector(KinisiFeedbackSourceVectorKind kind, uint32_t origin_id, uint32_t sequence) { return get_feedback_source_vector(static_cast<uint8_t>(kind), origin_id, sequence); }
+    feedback_source_health get_feedback_source_health(KinisiFeedbackSource source) { return get_feedback_source_health(static_cast<uint8_t>(source)); }
     bool set_imu_tracking(KinisiImuTrackingAction action, uint8_t confirmed, double yaw) { return set_imu_tracking(static_cast<uint8_t>(action), confirmed, yaw); }
     imu_tracking_vector get_imu_tracking_vector(KinisiImuTrackingVectorKind kind) { return get_imu_tracking_vector(static_cast<uint8_t>(kind)); }
     bool set_fusion_experiment(KinisiFusionMode mode, double yaw) { return set_fusion_experiment(static_cast<uint8_t>(mode), yaw); }

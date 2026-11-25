@@ -40,6 +40,29 @@ FEEDBACK_CATALOGS = [
 ]
 
 
+HEALTH_CATALOGS = [
+    ('feedback_source_health_states', 'FeedbackSourceHealthState', 'FEEDBACK_HEALTH',
+     ['HEALTHY', 'SUSPECT', 'UNAVAILABLE', 'INDETERMINATE']),
+    ('feedback_source_health_flags', 'FeedbackSourceHealthFlag', 'FEEDBACK_HEALTH_FLAG',
+     ['PROVENANCE', 'FRESH', 'DISAGREEMENT', 'COMPARISON_AVAILABLE', 'RECOVERING',
+      'RESTART_REQUIRED', 'TIMESTAMP_FAULT', 'SATURATION']),
+]
+
+
+def validate_feedback_health(schema):
+    commands = {c['command'] for c in schema['commands']}
+    required = {'GET_FEEDBACK_SOURCE_HEALTH', 'GET_FEEDBACK_IMU_CHANNELS'}
+    if not commands & required and not any(key in schema for key, *_ in HEALTH_CATALOGS):
+        return
+    if not required <= commands:
+        raise ValueError('Incomplete feedback health command family')
+    for key, _, _, names in HEALTH_CATALOGS:
+        values = schema.get(key, [])
+        ids = [1 << i for i in range(len(names))] if key.endswith('_flags') else range(len(names))
+        if [(v.get('id'), v.get('name')) for v in values] != list(zip(ids, names)) or any(type(v.get('id')) is not int for v in values):
+            raise ValueError('Invalid ' + key + ' catalog')
+
+
 def validate_feedback_source(schema):
     required = {'SET_FEEDBACK_SOURCE', 'GET_FEEDBACK_SOURCE_STATUS', 'GET_FEEDBACK_SOURCE_VECTOR',
                 'SET_FEEDBACK_FUSION_MOUNT', 'GET_FEEDBACK_FUSION_MOUNT'}
@@ -85,6 +108,7 @@ def validate_pwm_frequency(schema):
     validate_fusion(schema)
     validate_imu_tracking(schema)
     validate_feedback_source(schema)
+    validate_feedback_health(schema)
     values = schema.get('pwm_frequencies', [])
     expected = [(v, 'KHZ_' + str(v // 1000)) for v in (10000, 20000, 25000, 50000, 100000)]
     if [(v.get('id'), v.get('name')) for v in values] != expected or any(type(v.get('id')) is not int for v in values):
@@ -143,8 +167,9 @@ def generate(schema, output, check=False):
         for p in o['properties']:
             types.append(f"    {p['type']} {p['name']}; ///< {p['description']}\n")
         types.append('};\n')
-    for key, name in [('subscription_triggers', 'KinisiSubscriptionTrigger'), ('subscription_deliveries', 'KinisiSubscriptionDelivery')] + [(key, 'Kinisi' + name) for key, name, _, _ in FUSION_CATALOGS + IMU_TRACKING_CATALOGS + FEEDBACK_CATALOGS]:
-        types.append(f'enum class {name} : uint8_t {{\n')
+    for key, name in [('subscription_triggers', 'KinisiSubscriptionTrigger'), ('subscription_deliveries', 'KinisiSubscriptionDelivery')] + [(key, 'Kinisi' + name) for key, name, _, _ in FUSION_CATALOGS + IMU_TRACKING_CATALOGS + FEEDBACK_CATALOGS + HEALTH_CATALOGS]:
+        width = 'uint32_t' if key == 'feedback_source_health_flags' else 'uint8_t'
+        types.append(f'enum class {name} : {width} {{\n')
         for item in schema.get(key, []):
             types.append(f"    {item['name']} = {item['id']},\n")
         types.append('};\n')
@@ -245,6 +270,13 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
             offset += size(p['type'])
         if rt:
             source.append(f'    {rt} result = {{}};\n    uint8_t response[{size(rt)}] = {{0}};\n')
+            if c['command'] == 'GET_FEEDBACK_SOURCE_HEALTH':
+                source.append('    result.source = source;\n'
+                              '    result.health = static_cast<uint8_t>(KinisiFeedbackSourceHealthState::UNAVAILABLE);\n'
+                              '    result.reason = static_cast<uint8_t>(KinisiFeedbackSourceReason::UNAVAILABLE);\n'
+                              '    result.age_us = UINT32_MAX;\n')
+            elif c['command'] == 'GET_FEEDBACK_IMU_CHANNELS':
+                source.append('    result.accel_age_us = UINT32_MAX;\n    result.gyro_age_us = UINT32_MAX;\n')
             source.append(f'    if (!request(KINISI_{c["command"]}, payload, {n}, response, {size(rt)})) return result;\n')
             if rt in objects:
                 offset = 0
@@ -299,6 +331,8 @@ KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_
 """)
         header.append('    bool set_feedback_source(KinisiFeedbackSource source) { return set_feedback_source(static_cast<uint8_t>(source)); }\n')
         header.append('    feedback_source_vector get_feedback_source_vector(KinisiFeedbackSourceVectorKind kind, uint32_t origin_id, uint32_t sequence) { return get_feedback_source_vector(static_cast<uint8_t>(kind), origin_id, sequence); }\n')
+    if schema.get('feedback_source_health_states'):
+        header.append('    feedback_source_health get_feedback_source_health(KinisiFeedbackSource source) { return get_feedback_source_health(static_cast<uint8_t>(source)); }\n')
     if schema.get('imu_tracking_actions'):
         header.append('    bool set_imu_tracking(KinisiImuTrackingAction action, uint8_t confirmed, double yaw) { return set_imu_tracking(static_cast<uint8_t>(action), confirmed, yaw); }\n')
         header.append('    imu_tracking_vector get_imu_tracking_vector(KinisiImuTrackingVectorKind kind) { return get_imu_tracking_vector(static_cast<uint8_t>(kind)); }\n')

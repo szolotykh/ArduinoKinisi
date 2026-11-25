@@ -171,6 +171,16 @@ bool KinisiProtocol::supportsFusionExperiment() const {
         identity_.protocol_major == 2 && identity_.protocol_minor >= 19;
 }
 
+bool KinisiProtocol::supportsFeedbackImuChannels() const {
+    return KINISI_WIRE_BUFFER_SIZE >= 28 && ready_ && profile_known_ && profile_.capabilities.feedback_source_health &&
+        identity_.board_model == 1 && identity_.board_major == 0 && identity_.board_minor == 4 &&
+        identity_.board_patch == 0 && identity_.protocol_major == 2 && identity_.protocol_minor >= 22;
+}
+
+bool KinisiProtocol::supportsFeedbackSourceHealth() const {
+    return KINISI_WIRE_BUFFER_SIZE >= 32 && supportsFeedbackImuChannels();
+}
+
 bool KinisiProtocol::supportsFeedbackSourceSelector() const {
     return KINISI_WIRE_BUFFER_SIZE >= 32 && ready_ && profile_known_ && profile_.capabilities.feedback_source_selector &&
         identity_.board_model == 1 && identity_.board_major == 0 &&
@@ -310,6 +320,13 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         if (command == KINISI_SET_BOARD_IDLE && (length != 1 || payload[0] > 1))
             return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
     }
+    if (command == KINISI_GET_FEEDBACK_SOURCE_HEALTH) {
+        if (!supportsFeedbackSourceHealth()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+        if (length != 1 || payload[0] > 2)
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    }
+    if (command == KINISI_GET_FEEDBACK_IMU_CHANNELS && !supportsFeedbackImuChannels())
+        return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
     if (command >= KINISI_SET_FEEDBACK_SOURCE && command <= KINISI_GET_FEEDBACK_FUSION_MOUNT) {
         if (!supportsFeedbackSourceSelector()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
         if ((command == KINISI_SET_FEEDBACK_SOURCE && (length != 1 || payload[0] > 2)) ||
@@ -420,6 +437,9 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     uint32_t started = millis();
     if (!send(command, id, payload, length, response_length) ||
         !receive(command, command, id, response, response_length, started)) return false;
+    if (command == KINISI_GET_FEEDBACK_SOURCE_HEALTH &&
+        (response[0] != payload[0] || response[1] > 3 || response[2] > 9 || response[3] > 9))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
     if (command == KINISI_GET_FEEDBACK_SOURCE_STATUS) {
         const uint32_t age_us = uint32_t(kinisi_codec::readUnsigned(response + 21, 4));
         const uint32_t max_age_us = uint32_t(kinisi_codec::readUnsigned(response + 25, 2)) * 1000UL;
