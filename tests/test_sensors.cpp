@@ -877,6 +877,23 @@ static void feedback_health() {
         assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == count);
     }
 
+    if (c.supportsFeedbackImuChannels()) {
+        const auto channels_responder = Wire.responder;
+        kinisi_codec::writeUnsigned(data.data() + 16, UINT32_MAX, 4);
+        assert(c.get_feedback_imu_channels().accel_timestamp_us == stamp && c.lastError().failure == KinisiFailure::NONE);
+        for (uint8_t channel = 0; channel < 2; ++channel) {
+            data.assign(24, 0);
+            kinisi_codec::writeUnsigned(data.data() + 16, UINT32_MAX, 4);
+            kinisi_codec::writeUnsigned(data.data() + 20, UINT32_MAX, 4);
+            kinisi_codec::writeUnsigned(data.data() + 16 + 4 * channel, 10, 4);
+            const auto malformed = c.get_feedback_imu_channels();
+            assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+            assert(malformed.accel_age_us == UINT32_MAX && malformed.gyro_age_us == UINT32_MAX);
+            reset(4, 22);
+            assert(c.begin(1000, 0));
+            Wire.responder = channels_responder;
+        }
+    }
     expected = KINISI_GET_FEEDBACK_SOURCE_HEALTH;
     count = Wire.transactions;
     if (c.supportsFeedbackSourceHealth()) {

@@ -437,6 +437,13 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     uint32_t started = millis();
     if (!send(command, id, payload, length, response_length) ||
         !receive(command, command, id, response, response_length, started)) return false;
+    if (command == KINISI_GET_FEEDBACK_IMU_CHANNELS) {
+        for (uint8_t channel = 0; channel < 2; ++channel) {
+            const uint64_t stamp = kinisi_codec::readUnsigned(response + 8 * channel, 8);
+            const uint32_t age = uint32_t(kinisi_codec::readUnsigned(response + 16 + 4 * channel, 4));
+            if (!stamp && age != UINT32_MAX) return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+        }
+    }
     if (command == KINISI_GET_FEEDBACK_SOURCE_HEALTH &&
         (response[0] != payload[0] || response[1] > 3 || response[2] > 9 || response[3] > 9))
         return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
