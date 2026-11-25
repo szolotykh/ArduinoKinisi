@@ -15,6 +15,10 @@ supportsMotorCurrent	KEYWORD2
 supportsMotorFaults	KEYWORD2
 supportsDriverSleep	KEYWORD2
 supportsBoardIdle	KEYWORD2
+supportsImuMounting	KEYWORD2
+setImuMountGeometry	KEYWORD2
+getImuMountGeometry	KEYWORD2
+KinisiImuMountGeometry	KEYWORD1
 KinisiSubscriptionMode	KEYWORD1
 KinisiTopic	KEYWORD1
 KinisiTelemetrySample	KEYWORD1
@@ -113,3 +117,5 @@ set_feedback_fusion_mount	KEYWORD2
 get_feedback_fusion_mount	KEYWORD2
 get_feedback_source_health	KEYWORD2
 get_feedback_imu_channels	KEYWORD2
+set_imu_mount	KEYWORD2
+get_imu_mount	KEYWORD2

@@ -34,7 +34,7 @@ def validate(bundle):
                (('power',) if 'power' in profile else ()) +
                (('capabilities',) if 'capabilities' in profile else ()), 'board profile')
         if 'capabilities' in profile:
-            optional = ('imu_tracking', 'feedback_source_selector', 'feedback_source_health')
+            optional = ('imu_tracking', 'feedback_source_selector', 'feedback_source_health', 'imu_mounting')
             fields(profile['capabilities'], ('fusion_experiment',) + tuple(key for key in optional if key in profile['capabilities']), 'capabilities')
             for key, value in profile['capabilities'].items():
                 require(type(value) is bool, f'Invalid {key} capability')
@@ -107,7 +107,7 @@ def generate(bundle):
 enum class KinisiSensor : uint8_t { TEMPERATURE, IMU };
 struct KinisiBoardResources { uint8_t motors, encoders, gpio, status_leds; };
 struct KinisiPowerCapabilities { bool driver_sleep; bool board_idle; };
-struct KinisiExperimentCapabilities { bool fusion_experiment; bool imu_tracking; bool feedback_source_selector; bool feedback_source_health; };
+struct KinisiExperimentCapabilities { bool fusion_experiment; bool imu_tracking; bool feedback_source_selector; bool feedback_source_health; bool imu_mounting; };
 /** Discrete nominal thresholds in milliamps; count delimits the supported values. */
 struct KinisiCurrentLimitOptions { uint8_t threshold_count; uint16_t supported_thresholds_ma[THRESHOLD_CAPACITY]; bool can_disable; };
 struct KinisiPwmFrequencyOptions { uint32_t default_hz; uint8_t frequency_count; uint32_t supported_hz[PWM_CAPACITY]; };
@@ -176,7 +176,7 @@ const KinisiBoardProfile profiles[] KINISI_PROFILE_STORAGE = {
         pwm_value = '{' + f"{pwm.get('default_hz', 0)}UL, {len(frequencies)}, {{{', '.join(str(v) + 'UL' for v in frequencies) or '0'}}}" + '}'
         power_value = '{' + ', '.join(str(board.get('power', {}).get(key, False)).lower() for key in ('driver_sleep', 'board_idle')) + '}'
         capabilities = ', '.join(str(board.get('capabilities', {}).get(key, False)).lower()
-                                 for key in ('fusion_experiment', 'imu_tracking', 'feedback_source_selector', 'feedback_source_health'))
+                                 for key in ('fusion_experiment', 'imu_tracking', 'feedback_source_selector', 'feedback_source_health', 'imu_mounting'))
         source += (f'    {{{model}, {revision}, {{{counts}}}, {pwm_value}, {{{motor_values}}}, '
                    f'{len(temp)}, {{{temp_values}}}, {len(imu)}, {{{imu_values}}}, {power_value}, {{{capabilities}}}}},\n')
     source += '''};

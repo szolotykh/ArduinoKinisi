@@ -104,6 +104,8 @@ static const uint8_t KINISI_SET_FEEDBACK_FUSION_MOUNT = 0x6a;
 static const uint8_t KINISI_GET_FEEDBACK_FUSION_MOUNT = 0x6b;
 static const uint8_t KINISI_GET_FEEDBACK_SOURCE_HEALTH = 0x6c;
 static const uint8_t KINISI_GET_FEEDBACK_IMU_CHANNELS = 0x6d;
+static const uint8_t KINISI_SET_IMU_MOUNT = 0x6e;
+static const uint8_t KINISI_GET_IMU_MOUNT = 0x6f;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -379,6 +381,17 @@ struct feedback_imu_channels {
     uint64_t gyro_timestamp_us; ///< Last observed gyro acquisition time in board uptime microseconds.
     uint32_t accel_age_us; ///< Board-derived acquisition age in microseconds, UINT32_MAX if unknown.
     uint32_t gyro_age_us; ///< Board-derived acquisition age in microseconds, UINT32_MAX if unknown.
+};
+
+/** Signed board orientation and displacement to the chip in chassis axes. */
+struct imu_mount_configuration {
+    int16_t roll_cdeg; ///< Board-to-chassis roll in signed hundredths of a degree.
+    int16_t pitch_cdeg; ///< Board-to-chassis pitch in signed hundredths of a degree.
+    int16_t yaw_cdeg; ///< Board-to-chassis yaw in signed hundredths of a degree.
+    int32_t x_um; ///< Signed displacement from the tracking origin to the BMI088 chip along chassis +X (forward), in micrometres.
+    int32_t y_um; ///< Signed displacement from the tracking origin to the BMI088 chip along chassis +Y (left), in micrometres.
+    int32_t z_um; ///< Signed displacement from the tracking origin to the BMI088 chip along chassis +Z (up), in micrometres.
+    bool configured; ///< True after explicit mount setup or restore. False selects legacy per-mode yaw.
 };
 enum class KinisiSubscriptionTrigger : uint8_t {
     PERIODIC = 0,

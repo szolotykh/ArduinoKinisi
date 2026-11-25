@@ -12,6 +12,7 @@ INTERNAL = {'INIT', 'TIME_SYNC_RESPONSE'}
 HEADER = '// Generated from tools/commands.json; edit the schema or generator instead.\n'
 # Keep dependencies of the handwritten session while allowing new schema commands.
 SESSION_COMMANDS = {'PING', 'SET_HEARTBEAT_CONFIG', 'SUBSCRIBE_ODOMETRY',
+                    'SET_IMU_MOUNT', 'GET_IMU_MOUNT',
                     'SET_DRIVER_SLEEP', 'GET_DRIVER_SLEEP',
                     'SET_BOARD_IDLE', 'GET_BOARD_IDLE',
                     'SAVE_CONFIGURATION', 'GET_CONFIGURATION_FIELD',
@@ -331,6 +332,27 @@ KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_
 """)
         header.append('    bool set_feedback_source(KinisiFeedbackSource source) { return set_feedback_source(static_cast<uint8_t>(source)); }\n')
         header.append('    feedback_source_vector get_feedback_source_vector(KinisiFeedbackSourceVectorKind kind, uint32_t origin_id, uint32_t sequence) { return get_feedback_source_vector(static_cast<uint8_t>(kind), origin_id, sequence); }\n')
+    header.append('    bool setImuMountGeometry(double roll_deg, double pitch_deg, double yaw_deg, double x_m, double y_m, double z_m);\n')
+    header.append('    bool getImuMountGeometry(KinisiImuMountGeometry& mount);\n')
+    source.append("""
+bool KinisiController::setImuMountGeometry(double roll_deg, double pitch_deg, double yaw_deg,
+        double x_m, double y_m, double z_m) {
+    if (!(fabs(roll_deg) <= 180 && fabs(pitch_deg) <= 90 && fabs(yaw_deg) <= 180 &&
+          fabs(x_m) <= 10 && fabs(y_m) <= 10 && fabs(z_m) <= 10))
+        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_SET_IMU_MOUNT, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    return set_imu_mount(lround(roll_deg * 100), lround(pitch_deg * 100), lround(yaw_deg * 100),
+                         lround(x_m * 1000000), lround(y_m * 1000000), lround(z_m * 1000000));
+}
+
+bool KinisiController::getImuMountGeometry(KinisiImuMountGeometry& mount) {
+    const imu_mount_configuration raw = get_imu_mount();
+    mount = {};
+    if (lastError().failure != KinisiFailure::NONE) return false;
+    mount = {raw.roll_cdeg / 100.0, raw.pitch_cdeg / 100.0, raw.yaw_cdeg / 100.0,
+             raw.x_um / 1000000.0, raw.y_um / 1000000.0, raw.z_um / 1000000.0, raw.configured};
+    return true;
+}
+""")
     if schema.get('feedback_source_health_states'):
         header.append('    feedback_source_health get_feedback_source_health(KinisiFeedbackSource source) { return get_feedback_source_health(static_cast<uint8_t>(source)); }\n')
     if schema.get('imu_tracking_actions'):
@@ -346,6 +368,7 @@ KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_
     keywords += 'supportsMotorCurrent\tKEYWORD2\nsupportsMotorFaults\tKEYWORD2\n'
     keywords += 'supportsDriverSleep\tKEYWORD2\n'
     keywords += 'supportsBoardIdle\tKEYWORD2\n'
+    keywords += 'supportsImuMounting\tKEYWORD2\nsetImuMountGeometry\tKEYWORD2\ngetImuMountGeometry\tKEYWORD2\nKinisiImuMountGeometry\tKEYWORD1\n'
     if topics:
         keywords += 'KinisiSubscriptionMode\tKEYWORD1\nKinisiTopic\tKEYWORD1\nKinisiTelemetrySample\tKEYWORD1\nsupportsTopic\tKEYWORD2\ngetSubscriptionSample\tKEYWORD2\n'
     if schema.get('subscription_triggers'):

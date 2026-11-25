@@ -5,6 +5,16 @@
 #include <string.h>
 #include <math.h>
 
+static bool validImuMount(const uint8_t* bytes) {
+    for (uint8_t i = 0; i < 3; ++i) {
+        const int16_t angle = static_cast<int16_t>(kinisi_codec::readUnsigned(bytes + 2 * i, 2));
+        const int16_t limit = i == 1 ? 9000 : 18000;
+        const int32_t offset = static_cast<int32_t>(kinisi_codec::readUnsigned(bytes + 6 + 4 * i, 4));
+        if (angle < -limit || angle > limit || offset < -10000000L || offset > 10000000L) return false;
+    }
+    return true;
+}
+
 /** Initialize local state without starting any bus traffic. */
 KinisiProtocol::KinisiProtocol(uint8_t address)
     : address_(address), next_id_(1), timeout_ms_(1000), ready_(false), identity_(), profile_(), profile_known_(false), error_(),
@@ -181,6 +191,12 @@ bool KinisiProtocol::supportsFeedbackSourceHealth() const {
     return KINISI_WIRE_BUFFER_SIZE >= 32 && supportsFeedbackImuChannels();
 }
 
+bool KinisiProtocol::supportsImuMounting() const {
+    return KINISI_WIRE_BUFFER_SIZE >= 23 && ready_ && profile_known_ && profile_.capabilities.imu_mounting &&
+        identity_.board_model == 1 && identity_.board_major == 0 && identity_.board_minor == 4 &&
+        identity_.board_patch == 0 && identity_.protocol_major == 2 && identity_.protocol_minor >= 23;
+}
+
 bool KinisiProtocol::supportsFeedbackSourceSelector() const {
     return KINISI_WIRE_BUFFER_SIZE >= 32 && ready_ && profile_known_ && profile_.capabilities.feedback_source_selector &&
         identity_.board_model == 1 && identity_.board_major == 0 &&
@@ -325,6 +341,11 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         if (length != 1 || payload[0] > 2)
             return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
     }
+    if (command == KINISI_SET_IMU_MOUNT || command == KINISI_GET_IMU_MOUNT) {
+        if (!supportsImuMounting()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+        if (command == KINISI_SET_IMU_MOUNT && (length != 18 || !validImuMount(payload)))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    }
     if (command == KINISI_GET_FEEDBACK_IMU_CHANNELS && !supportsFeedbackImuChannels())
         return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
     if (command >= KINISI_SET_FEEDBACK_SOURCE && command <= KINISI_GET_FEEDBACK_FUSION_MOUNT) {
@@ -437,6 +458,8 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     uint32_t started = millis();
     if (!send(command, id, payload, length, response_length) ||
         !receive(command, command, id, response, response_length, started)) return false;
+    if (command == KINISI_GET_IMU_MOUNT && (response_length != 19 || response[18] > 1 || !validImuMount(response)))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
     if (command == KINISI_GET_FEEDBACK_IMU_CHANNELS) {
         for (uint8_t channel = 0; channel < 2; ++channel) {
             const uint64_t stamp = kinisi_codec::readUnsigned(response + 8 * channel, 8);

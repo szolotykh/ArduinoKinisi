@@ -26,6 +26,13 @@ struct KinisiError {
     uint16_t message_id;
 };
 
+/** Board-to-chassis angles in degrees; tracking-origin to BMI088 offsets in chassis metres. */
+struct KinisiImuMountGeometry {
+    double roll_deg, pitch_deg, yaw_deg;
+    double x_m, y_m, z_m;
+    bool configured;
+};
+
 class KinisiProtocol {
 public:
     /** Create an inactive session. Request IDs persist across begin() calls. */
@@ -58,6 +65,7 @@ public:
     /** Exact v0.4.0 experiment capability and READY protocol 2.19+. */
     bool supportsFusionExperiment() const;
     bool supportsImuTracking() const;
+    bool supportsImuMounting() const;
     bool supportsFeedbackSourceSelector() const;
     bool supportsFeedbackSourceHealth() const;
     bool supportsFeedbackImuChannels() const;
@@ -71,6 +79,9 @@ public:
     /** Failure of the most recent operation; inspect after every value-returning getter. */
     const KinisiError& lastError() const { return error_; }
 protected:
+    /** Set structured failure; fatal transport/protocol failures invalidate the session. */
+    bool fail(KinisiFailure failure, uint8_t command, uint16_t id,
+              KinisiErrorCode code = KinisiErrorCode::NONE);
     /** Reject invalid velocity gains locally; integral contribution is 0..100 PWM points. */
     bool validateVelocityTuning(uint8_t command, double kp, double ki, double kd, double limit);
     /** Execute exactly one request; never retry an operation that might have executed. */
@@ -99,9 +110,6 @@ private:
     void clearSubscriptions();
     /** Validate and cache one unsolicited ID-zero telemetry frame. */
     bool telemetry(const uint8_t* frame, uint8_t size);
-    /** Set structured failure; fatal transport/protocol failures invalidate the session. */
-    bool fail(KinisiFailure failure, uint8_t command, uint16_t id,
-              KinisiErrorCode code = KinisiErrorCode::NONE);
     /** Write a frame only after validating request and response buffer limits. */
     bool send(uint8_t command, uint16_t id, const uint8_t* payload,
               uint8_t length, uint8_t response_length);

@@ -55,6 +55,10 @@ void setup() {
     // Compiles the IMU getter too; a default Uno rejects this before I2C (32-byte Wire).
     imu_sample sample = controller.get_imu(0);
     if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(sample.acceleration_z);
+    if (controller.supportsImuMounting()) {
+        KinisiImuMountGeometry mount{};
+        if (controller.getImuMountGeometry(mount) && mount.configured) Serial.println(mount.y_m);
+    }
     if (controller.supportsTopic(KinisiTopic::TEMPERATURE))
         controller.subscribe(KinisiTopic::TEMPERATURE, 0, 250);
     if (controller.supportsMotorFaults(0)) {
