@@ -1069,6 +1069,34 @@ imu_mount_configuration KinisiController::get_imu_mount() {
     return result;
 }
 
+/** Encode SET_BOARD_MOUNT, match its reply, and decode the payload. */
+bool KinisiController::set_board_mount(int16_t roll_cdeg, int16_t pitch_cdeg, int16_t yaw_cdeg, int32_t x_um, int32_t y_um, int32_t z_um) {
+    uint8_t payload[18] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(roll_cdeg), 2);
+    kinisi_codec::writeUnsigned(payload + 2, static_cast<uint64_t>(pitch_cdeg), 2);
+    kinisi_codec::writeUnsigned(payload + 4, static_cast<uint64_t>(yaw_cdeg), 2);
+    kinisi_codec::writeUnsigned(payload + 6, static_cast<uint64_t>(x_um), 4);
+    kinisi_codec::writeUnsigned(payload + 10, static_cast<uint64_t>(y_um), 4);
+    kinisi_codec::writeUnsigned(payload + 14, static_cast<uint64_t>(z_um), 4);
+    return request(KINISI_SET_BOARD_MOUNT, payload, 18, nullptr, 0);
+}
+
+/** Encode GET_BOARD_MOUNT, match its reply, and decode the payload. */
+board_mount_configuration KinisiController::get_board_mount() {
+    uint8_t payload[1] = {0};
+    board_mount_configuration result = {};
+    uint8_t response[19] = {0};
+    if (!request(KINISI_GET_BOARD_MOUNT, payload, 0, response, 19)) return result;
+    result.roll_cdeg = static_cast<int16_t>(kinisi_codec::readUnsigned(response + 0, 2));
+    result.pitch_cdeg = static_cast<int16_t>(kinisi_codec::readUnsigned(response + 2, 2));
+    result.yaw_cdeg = static_cast<int16_t>(kinisi_codec::readUnsigned(response + 4, 2));
+    result.x_um = static_cast<int32_t>(kinisi_codec::readUnsigned(response + 6, 4));
+    result.y_um = static_cast<int32_t>(kinisi_codec::readUnsigned(response + 10, 4));
+    result.z_um = static_cast<int32_t>(kinisi_codec::readUnsigned(response + 14, 4));
+    result.configured = static_cast<bool>(kinisi_codec::readUnsigned(response + 18, 1));
+    return result;
+}
+
 KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_status& status,
         feedback_source_vector& pose, feedback_source_vector& twist) {
     status = {}; pose = {}; twist = {};
@@ -1103,6 +1131,24 @@ KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_
         }
     }
     return KinisiFeedbackRead::CHANGED;
+}
+
+bool KinisiController::setBoardMountGeometry(double roll_deg, double pitch_deg, double yaw_deg,
+        double x_m, double y_m, double z_m) {
+    if (!(fabs(roll_deg) <= 180 && fabs(pitch_deg) <= 90 && fabs(yaw_deg) <= 180 &&
+          fabs(x_m) <= 10 && fabs(y_m) <= 10 && fabs(z_m) <= 10))
+        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_SET_BOARD_MOUNT, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    return set_board_mount(lround(roll_deg * 100), lround(pitch_deg * 100), lround(yaw_deg * 100),
+                         lround(x_m * 1000000), lround(y_m * 1000000), lround(z_m * 1000000));
+}
+
+bool KinisiController::getBoardMountGeometry(KinisiBoardMountGeometry& mount) {
+    const board_mount_configuration raw = get_board_mount();
+    mount = {};
+    if (lastError().failure != KinisiFailure::NONE) return false;
+    mount = {raw.roll_cdeg / 100.0, raw.pitch_cdeg / 100.0, raw.yaw_cdeg / 100.0,
+             raw.x_um / 1000000.0, raw.y_um / 1000000.0, raw.z_um / 1000000.0, raw.configured};
+    return true;
 }
 
 bool KinisiController::setImuMountGeometry(double roll_deg, double pitch_deg, double yaw_deg,

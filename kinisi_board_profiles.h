@@ -11,6 +11,7 @@ struct KinisiExperimentCapabilities { bool fusion_experiment; bool imu_tracking;
 struct KinisiCurrentLimitOptions { uint8_t threshold_count; uint16_t supported_thresholds_ma[4]; bool can_disable; };
 struct KinisiPwmFrequencyOptions { uint32_t default_hz; uint8_t frequency_count; uint32_t supported_hz[5]; };
 struct KinisiMotorFeatures { uint8_t id; bool current_sense, current_limit, fault_reporting; KinisiCurrentLimitOptions current_limit_options; };
+struct KinisiImuGeometry { bool present; int32_t underside_center_to_imu_um[3]; };
 struct KinisiImuFeatures { uint8_t id; bool accelerometer, gyroscope; };
 
 /** Public hardware metadata; counts delimit valid entries in each array. */
@@ -24,6 +25,7 @@ struct KinisiBoardProfile {
     KinisiImuFeatures imu[1];
     KinisiPowerCapabilities power;
     KinisiExperimentCapabilities capabilities;
+    KinisiImuGeometry imu_geometry;
     /** Physical presence only; also check controller.supportsSensor before reading. */
     bool hasSensor(KinisiSensor kind, uint8_t index = 0) const {
         if (kind == KinisiSensor::TEMPERATURE) {

@@ -12,7 +12,7 @@ INTERNAL = {'INIT', 'TIME_SYNC_RESPONSE'}
 HEADER = '// Generated from tools/commands.json; edit the schema or generator instead.\n'
 # Keep dependencies of the handwritten session while allowing new schema commands.
 SESSION_COMMANDS = {'PING', 'SET_HEARTBEAT_CONFIG', 'SUBSCRIBE_ODOMETRY',
-                    'SET_IMU_MOUNT', 'GET_IMU_MOUNT',
+                    'SET_IMU_MOUNT', 'GET_IMU_MOUNT', 'SET_BOARD_MOUNT', 'GET_BOARD_MOUNT',
                     'SET_DRIVER_SLEEP', 'GET_DRIVER_SLEEP',
                     'SET_BOARD_IDLE', 'GET_BOARD_IDLE',
                     'SAVE_CONFIGURATION', 'GET_CONFIGURATION_FIELD',
@@ -159,6 +159,8 @@ def generate(schema, output, check=False):
         if 'retired' in c:
             types.append('/** @deprecated ' + retirement_notice(c) + ' */\n')
         types.append(f"static const uint8_t KINISI_{c['command']} = {c['code']};\n")
+    read_offset = next(p for p in objects['board_mount_configuration']['properties'] if p['name'] == 'x_um')
+    types.append(f"static const int32_t KINISI_MOUNT_READ_OFFSET_MAX_UM = {read_offset['range'][1]}L;\n")
     types.append('\n/** Shared controller error codes; see commands.json for per-command errors. */\nenum class KinisiErrorCode : uint8_t {\n    NONE = 0,\n')
     for e in schema['error_codes']:
         types.append(f"    {e['name']} = {e['code']}, // {e['description']}\n")
@@ -332,26 +334,31 @@ KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_
 """)
         header.append('    bool set_feedback_source(KinisiFeedbackSource source) { return set_feedback_source(static_cast<uint8_t>(source)); }\n')
         header.append('    feedback_source_vector get_feedback_source_vector(KinisiFeedbackSourceVectorKind kind, uint32_t origin_id, uint32_t sequence) { return get_feedback_source_vector(static_cast<uint8_t>(kind), origin_id, sequence); }\n')
-    header.append('    bool setImuMountGeometry(double roll_deg, double pitch_deg, double yaw_deg, double x_m, double y_m, double z_m);\n')
-    header.append('    bool getImuMountGeometry(KinisiImuMountGeometry& mount);\n')
-    source.append("""
-bool KinisiController::setImuMountGeometry(double roll_deg, double pitch_deg, double yaw_deg,
-        double x_m, double y_m, double z_m) {
+    for kind, wire, reference in (
+            ('Board', 'board', 'Tracking origin to PCB underside center in chassis metres.'),
+            ('Imu', 'imu', '@deprecated Chip-referenced mounting. Offsets locate the BMI088 in chassis metres.')):
+        header.append(f'    /** {reference} Angles in degrees. */\n')
+        header.append(f'    bool set{kind}MountGeometry(double roll_deg, double pitch_deg, double yaw_deg, double x_m, double y_m, double z_m);\n')
+        header.append(f'    /** {reference} Read the applied pose and configuration flag. */\n')
+        header.append(f'    bool get{kind}MountGeometry(Kinisi{kind}MountGeometry& mount);\n')
+        source.append(f"""
+bool KinisiController::set{kind}MountGeometry(double roll_deg, double pitch_deg, double yaw_deg,
+        double x_m, double y_m, double z_m) {{
     if (!(fabs(roll_deg) <= 180 && fabs(pitch_deg) <= 90 && fabs(yaw_deg) <= 180 &&
           fabs(x_m) <= 10 && fabs(y_m) <= 10 && fabs(z_m) <= 10))
-        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_SET_IMU_MOUNT, 0, KinisiErrorCode::INVALID_ARGUMENT);
-    return set_imu_mount(lround(roll_deg * 100), lround(pitch_deg * 100), lround(yaw_deg * 100),
+        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_SET_{wire.upper()}_MOUNT, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    return set_{wire}_mount(lround(roll_deg * 100), lround(pitch_deg * 100), lround(yaw_deg * 100),
                          lround(x_m * 1000000), lround(y_m * 1000000), lround(z_m * 1000000));
-}
+}}
 
-bool KinisiController::getImuMountGeometry(KinisiImuMountGeometry& mount) {
-    const imu_mount_configuration raw = get_imu_mount();
-    mount = {};
+bool KinisiController::get{kind}MountGeometry(Kinisi{kind}MountGeometry& mount) {{
+    const {wire}_mount_configuration raw = get_{wire}_mount();
+    mount = {{}};
     if (lastError().failure != KinisiFailure::NONE) return false;
-    mount = {raw.roll_cdeg / 100.0, raw.pitch_cdeg / 100.0, raw.yaw_cdeg / 100.0,
-             raw.x_um / 1000000.0, raw.y_um / 1000000.0, raw.z_um / 1000000.0, raw.configured};
+    mount = {{raw.roll_cdeg / 100.0, raw.pitch_cdeg / 100.0, raw.yaw_cdeg / 100.0,
+             raw.x_um / 1000000.0, raw.y_um / 1000000.0, raw.z_um / 1000000.0, raw.configured}};
     return true;
-}
+}}
 """)
     if schema.get('feedback_source_health_states'):
         header.append('    feedback_source_health get_feedback_source_health(KinisiFeedbackSource source) { return get_feedback_source_health(static_cast<uint8_t>(source)); }\n')
@@ -368,6 +375,7 @@ bool KinisiController::getImuMountGeometry(KinisiImuMountGeometry& mount) {
     keywords += 'supportsMotorCurrent\tKEYWORD2\nsupportsMotorFaults\tKEYWORD2\n'
     keywords += 'supportsDriverSleep\tKEYWORD2\n'
     keywords += 'supportsBoardIdle\tKEYWORD2\n'
+    keywords += 'supportsBoardMounting\tKEYWORD2\nsetBoardMountGeometry\tKEYWORD2\ngetBoardMountGeometry\tKEYWORD2\nKinisiBoardMountGeometry\tKEYWORD1\n'
     keywords += 'supportsImuMounting\tKEYWORD2\nsetImuMountGeometry\tKEYWORD2\ngetImuMountGeometry\tKEYWORD2\nKinisiImuMountGeometry\tKEYWORD1\n'
     if topics:
         keywords += 'KinisiSubscriptionMode\tKEYWORD1\nKinisiTopic\tKEYWORD1\nKinisiTelemetrySample\tKEYWORD1\nsupportsTopic\tKEYWORD2\ngetSubscriptionSample\tKEYWORD2\n'

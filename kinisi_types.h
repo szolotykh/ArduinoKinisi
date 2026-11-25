@@ -106,6 +106,9 @@ static const uint8_t KINISI_GET_FEEDBACK_SOURCE_HEALTH = 0x6c;
 static const uint8_t KINISI_GET_FEEDBACK_IMU_CHANNELS = 0x6d;
 static const uint8_t KINISI_SET_IMU_MOUNT = 0x6e;
 static const uint8_t KINISI_GET_IMU_MOUNT = 0x6f;
+static const uint8_t KINISI_SET_BOARD_MOUNT = 0x85;
+static const uint8_t KINISI_GET_BOARD_MOUNT = 0x86;
+static const int32_t KINISI_MOUNT_READ_OFFSET_MAX_UM = 10031098L;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -359,7 +362,7 @@ struct feedback_source_vector {
 /** Passive tracking mount, independent of chassis control. */
 struct feedback_fusion_mount {
     uint8_t confirmed; ///< One after an explicit mount declaration this boot.
-    double mounting_yaw_rad; ///< Angle of board +X in chassis XY, counterclockwise about +Z in radians. Rigid, level, centered board with +Z up.
+    double mounting_yaw_rad; ///< Angle of board +X in chassis XY, counterclockwise about +Z in radians. A centered, level board with +Z up is required only for a yaw-only installation.
 };
 
 /** Read producer health independently of selector and control. ENCODER is the running platform encoder batch, IMU_ONLY is physical BMI088 pair availability independent of the one-second estimate, FUSED is the passive fused estimate. Disagreement indicates conflicting observations without assigning sensor blame. HEALTHY means directly usable data. Comparability is separate. Historical provenance remains readable during failure. Reconnect reads board state. */
@@ -388,9 +391,20 @@ struct imu_mount_configuration {
     int16_t roll_cdeg; ///< Board-to-chassis roll in signed hundredths of a degree.
     int16_t pitch_cdeg; ///< Board-to-chassis pitch in signed hundredths of a degree.
     int16_t yaw_cdeg; ///< Board-to-chassis yaw in signed hundredths of a degree.
-    int32_t x_um; ///< Signed displacement from the tracking origin to the BMI088 chip along chassis +X (forward), in micrometres.
-    int32_t y_um; ///< Signed displacement from the tracking origin to the BMI088 chip along chassis +Y (left), in micrometres.
-    int32_t z_um; ///< Signed displacement from the tracking origin to the BMI088 chip along chassis +Z (up), in micrometres.
+    int32_t x_um; ///< Signed displacement from the tracking origin to the BMI088 chip along chassis +X (forward), in micrometres. A position derived from the other reference can exceed its setter's 10 m input range.
+    int32_t y_um; ///< Signed displacement from the tracking origin to the BMI088 chip along chassis +Y (left), in micrometres. A position derived from the other reference can exceed its setter's 10 m input range.
+    int32_t z_um; ///< Signed displacement from the tracking origin to the BMI088 chip along chassis +Z (up), in micrometres. A position derived from the other reference can exceed its setter's 10 m input range.
+    bool configured; ///< True after explicit mount setup or restore. False selects legacy per-mode yaw.
+};
+
+/** Applied orientation and chassis-to-PCB underside-center displacement. */
+struct board_mount_configuration {
+    int16_t roll_cdeg; ///< Board-to-chassis roll in signed hundredths of a degree.
+    int16_t pitch_cdeg; ///< Board-to-chassis pitch in signed hundredths of a degree.
+    int16_t yaw_cdeg; ///< Board-to-chassis yaw in signed hundredths of a degree.
+    int32_t x_um; ///< Signed displacement from the tracking origin to the geometric center of the PCB underside along chassis +X (forward), in micrometres. A position derived from the other reference can exceed its setter's 10 m input range.
+    int32_t y_um; ///< Signed displacement from the tracking origin to the geometric center of the PCB underside along chassis +Y (left), in micrometres. A position derived from the other reference can exceed its setter's 10 m input range.
+    int32_t z_um; ///< Signed displacement from the tracking origin to the geometric center of the PCB underside along chassis +Z (up), in micrometres. A position derived from the other reference can exceed its setter's 10 m input range.
     bool configured; ///< True after explicit mount setup or restore. False selects legacy per-mode yaw.
 };
 enum class KinisiSubscriptionTrigger : uint8_t {

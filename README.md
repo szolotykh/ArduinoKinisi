@@ -4,6 +4,8 @@ Arduino library for controlling Kinisi motion controllers over I2C. Use it to
 control motors and platforms, read encoders and sensors, and subscribe to live
 measurements. Bundled board profiles let applications check which features the
 connected controller supports.
+For IMU-only or fused tracking on a Mini with protocol 2.24+, measure the
+[PCB underside-center mounting pose](docs/imu-mounting.md).
 
 ## Getting started
 

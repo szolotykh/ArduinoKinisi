@@ -62,6 +62,11 @@ static void profiles() {
     for (uint8_t i = 1; i <= 4; ++i) {
         assert(kinisiLookupBoardProfile(1, 0, i, 0, profile));
         assert(profile.capabilities.imu_mounting == (i == 4));
+        assert(profile.imu_geometry.present == (i == 4));
+        if (profile.imu_geometry.present) {
+            const auto& vector = profile.imu_geometry.underside_center_to_imu_um;
+            assert(vector[0] == -15373 && vector[1] == 26953 && vector[2] == 2075);
+        }
         assert(profile.model == 1 && profile.major == 0 && profile.minor == i && profile.patch == 0);
         assert(profile.resources.motors == 4 && profile.resources.encoders == encoder_counts[i - 1]);
         assert(profile.resources.gpio == gpio_counts[i - 1] && profile.resources.status_leds == 1);
@@ -1024,7 +1029,7 @@ static void imu_mounting() {
     assert(c.begin(1000, 0));
     Wire.responder = [](const std::vector<uint8_t>& bytes) {
         std::vector<uint8_t> malformed(19);
-        kinisi_codec::writeUnsigned(malformed.data() + 6, 10000001UL, 4);
+        kinisi_codec::writeUnsigned(malformed.data() + 6, 10031099UL, 4);
         Wire.responses.push_back(frame(bytes[1], bytes[2] | uint16_t(bytes[3]) << 8, malformed));
     };
     assert(!c.getImuMountGeometry(geometry) && !c.ready());
@@ -1047,7 +1052,92 @@ static void imu_mounting() {
     puts("PASS mounting readiness, signed units, readback and refusal");
 }
 
+static void board_mounting() {
+    KinisiController c;
+    KinisiBoardMountGeometry mount{};
+    reset(4, 24);
+    assert(!c.supportsBoardMounting() && !c.getBoardMountGeometry(mount) && Wire.transactions == 0);
+    for (auto minor : {3, 4, 5}) {
+        reset(minor, minor == 4 ? 23 : 24);
+        assert(c.begin(1000, 0) && !c.supportsBoardMounting());
+        const auto before = Wire.transactions;
+        assert(!c.getBoardMountGeometry(mount) && !c.setBoardMountGeometry(0, 0, 0, 0, 0, 0));
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+    }
+    reset(4, 24);
+    assert(c.begin(1000, 0));
+    const auto before = Wire.transactions;
+    if (KINISI_WIRE_BUFFER_SIZE < 23) {
+        assert(!c.supportsBoardMounting() && !c.getBoardMountGeometry(mount) && Wire.transactions == before);
+        return;
+    }
+    assert(c.supportsBoardMounting() && c.supportsImuMounting());
+    const std::vector<uint8_t> center = {0x28, 0x23, 0, 0, 0xff, 0xff, 0, 0, 0, 0,
+        0x60, 0x79, 0xfe, 0xff, 1, 0, 0, 0};
+    std::vector<uint8_t> reply(19);
+    uint8_t expected = 0x86;
+    Wire.responder = [&](const std::vector<uint8_t>& bytes) {
+        const uint16_t id = bytes[2] | uint16_t(bytes[3]) << 8;
+        assert(bytes[1] == expected);
+        if (expected == 0x85 || expected == 0x6e) {
+            assert(std::vector<uint8_t>(bytes.begin() + 4, bytes.end()) == center);
+            Wire.responses.push_back(frame(expected, id));
+        } else {
+            assert(bytes.size() == 4);
+            Wire.responses.push_back(frame(expected, id, reply));
+        }
+    };
+    assert(c.getBoardMountGeometry(mount) && !mount.configured && mount.y_m == 0);
+    expected = 0x85;
+    assert(c.setBoardMountGeometry(90, 0, -.005, 0, -.1, .0000005));
+    expected = 0x86;
+    reply = center;
+    reply.push_back(1);
+    assert(c.getBoardMountGeometry(mount) && mount.configured && mount.roll_deg == 90 &&
+           mount.yaw_deg == -.01 && mount.y_m == -.1 && mount.z_m == .000001);
+    expected = 0x6e;
+    assert(c.setImuMountGeometry(90, 0, -.005, 0, -.1, .0000005));
+    kinisi_codec::writeUnsigned(reply.data() + 6, static_cast<uint32_t>(-10031098L), 4);
+    kinisi_codec::writeUnsigned(reply.data() + 10, 10031098UL, 4);
+    expected = 0x6f;
+    assert(c.get_imu_mount().x_um == -10031098L && c.ready());
+    expected = 0x86;
+    assert(c.get_board_mount().y_um == 10031098L && c.ready());
+    const auto count = Wire.transactions;
+    assert(!c.setBoardMountGeometry(0, NAN, 0, 0, 0, 0));
+    assert(!c.setBoardMountGeometry(0, 0, 0, 0, -10.0000001, 0));
+    assert(!c.set_board_mount(0, 0, 0, 10000001L, 0, 0));
+    assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == count);
+    kinisi_codec::writeUnsigned(reply.data() + 6, 10031099UL, 4);
+    assert(!c.getBoardMountGeometry(mount) && !mount.configured && !c.ready());
+    assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    reset(4, 25);
+    assert(c.begin(1000, 0) && c.supportsBoardMounting());
+    Wire.responder = [](const std::vector<uint8_t>& bytes) {
+        assert(bytes[1] == 0x85);
+        Wire.responses.push_back(frame(KINISI_ERROR, bytes[2] | uint16_t(bytes[3]) << 8,
+            {bytes[1], uint8_t(KinisiErrorCode::SOURCE_SWITCH_UNSAFE)}));
+    };
+    assert(!c.setBoardMountGeometry(0, 0, 0, 0, 0, 0));
+    assert(c.lastError().code == KinisiErrorCode::SOURCE_SWITCH_UNSAFE && c.ready());
+    for (uint8_t flag : {0, 2}) {
+        reset(4, 24);
+        assert(c.begin(1000, 0));
+        Wire.responder = [flag](const std::vector<uint8_t>& bytes) {
+            assert(bytes[1] == 0x86);
+            std::vector<uint8_t> invalid(19);
+            invalid[0] = 1;
+            invalid[18] = flag;
+            Wire.responses.push_back(frame(bytes[1], bytes[2] | uint16_t(bytes[3]) << 8, invalid));
+        };
+        assert(!c.getBoardMountGeometry(mount) && !mount.configured && !c.ready());
+        assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    }
+    puts("PASS board-center mount frames, limits, chip compatibility and refusal");
+}
+
 int main() {
+    board_mounting();
     imu_mounting();
     feedback_health();
     if (KINISI_WIRE_BUFFER_SIZE < 32) {

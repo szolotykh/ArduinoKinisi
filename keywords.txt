@@ -15,6 +15,10 @@ supportsMotorCurrent	KEYWORD2
 supportsMotorFaults	KEYWORD2
 supportsDriverSleep	KEYWORD2
 supportsBoardIdle	KEYWORD2
+supportsBoardMounting	KEYWORD2
+setBoardMountGeometry	KEYWORD2
+getBoardMountGeometry	KEYWORD2
+KinisiBoardMountGeometry	KEYWORD1
 supportsImuMounting	KEYWORD2
 setImuMountGeometry	KEYWORD2
 getImuMountGeometry	KEYWORD2
@@ -119,3 +123,5 @@ get_feedback_source_health	KEYWORD2
 get_feedback_imu_channels	KEYWORD2
 set_imu_mount	KEYWORD2
 get_imu_mount	KEYWORD2
+set_board_mount	KEYWORD2
+get_board_mount	KEYWORD2

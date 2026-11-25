@@ -26,6 +26,13 @@ struct KinisiError {
     uint16_t message_id;
 };
 
+/** Board-to-chassis angles in degrees; tracking-origin to PCB underside-center offsets in chassis metres. */
+struct KinisiBoardMountGeometry {
+    double roll_deg, pitch_deg, yaw_deg;
+    double x_m, y_m, z_m;
+    bool configured;
+};
+
 /** Board-to-chassis angles in degrees; tracking-origin to BMI088 offsets in chassis metres. */
 struct KinisiImuMountGeometry {
     double roll_deg, pitch_deg, yaw_deg;
@@ -65,6 +72,8 @@ public:
     /** Exact v0.4.0 experiment capability and READY protocol 2.19+. */
     bool supportsFusionExperiment() const;
     bool supportsImuTracking() const;
+    bool supportsBoardMounting() const;
+    /** Deprecated chip-reference API, available since protocol 2.23. */
     bool supportsImuMounting() const;
     bool supportsFeedbackSourceSelector() const;
     bool supportsFeedbackSourceHealth() const;

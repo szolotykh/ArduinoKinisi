@@ -30,6 +30,22 @@ class ProfileTests(unittest.TestCase):
     def setUp(self):
         self.bundle = json.loads((ROOT / 'tools/board_profiles.json').read_text(encoding='utf-8'))
 
+    def test_generated_mini_geometry_uses_input_vector(self):
+        mini = self.bundle['boards'][-1]
+        self.assertEqual(mini['imu_geometry']['underside_center_to_imu_um'], [-15373, 26953, 2075])
+        mini['imu_geometry']['underside_center_to_imu_um'] = [105, -206, 307]
+        self.assertIn('{true, {105, -206, 307}}', profiles.generate(self.bundle)['kinisi_board_profiles.cpp'])
+        del mini['imu_geometry']
+        profiles.generate(self.bundle)
+        for invalid in ([1, 2], [False, 2, 3], [1.0, 2, 3], [1, 2, 2**31], [-2**31-1, 2, 3]):
+            mini['imu_geometry'] = {'underside_center_to_imu_um': invalid}
+            with self.assertRaises(ValueError):
+                profiles.generate(self.bundle)
+        del mini['imu_geometry']
+        self.bundle['boards'][0]['imu_geometry'] = {'underside_center_to_imu_um': [1, 2, 3]}
+        with self.assertRaises(ValueError):
+            profiles.generate(self.bundle)
+
     def test_current_profiles_and_flash_storage(self):
         self.assertEqual(len(self.bundle['boards']), 5)
         for name, content in profiles.generate(self.bundle).items():
