@@ -1136,7 +1136,56 @@ static void board_mounting() {
     puts("PASS board-center mount frames, limits, chip compatibility and refusal");
 }
 
+static void mecanum_roller_orientation() {
+    using Orientation = KinisiMecanumRollerOrientation;
+    KinisiController c;
+    auto initialize = [&](Orientation layout) {
+        return c.initialize_mecanum_platform_oriented(true,false,true,false,false,true,false,true,
+                                                      .34,.26,.1,4096.,layout);
+    };
+    Orientation applied = Orientation::MIRRORED;
+    reset(3, 24);
+    assert(c.begin(1000, 0));
+    auto before = Wire.transactions;
+    assert(c.getMecanumRollerOrientation(applied) && applied == Orientation::STANDARD);
+    assert(!initialize(Orientation::MIRRORED) && c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND);
+    assert(Wire.transactions == before);
+    for (uint8_t revision : {3, 4}) {
+        reset(revision, 25);
+        assert(c.begin(1000, 0));
+        Wire.responder = [](const std::vector<uint8_t>& r) {
+            const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+            if (r[1] == KINISI_GET_CONFIGURATION_FIELD) {
+                assert(r.size() == 6 && r[4] == 7 && r[5] == 0);
+                Wire.responses.push_back(frame(r[1], id, {0,0,0,0,0,0,0xf0,0x3f}));
+            } else {
+                assert(r.size() == (r[1] == 0x87 ? 45U : 44U));
+                assert(r[1] == 0x30 || r[1] == 0x87);
+                assert(r[0] == r.size() - 1);
+                assert(r[4] == 1 && r[5] == 0 && r[6] == 1 && r[7] == 0);
+                assert(r[8] == 0 && r[9] == 1 && r[10] == 0 && r[11] == 1);
+                assert(kinisi_codec::readDouble(r.data()+12) == .34 && kinisi_codec::readDouble(r.data()+20) == .26);
+                assert(kinisi_codec::readDouble(r.data()+28) == .1 && kinisi_codec::readDouble(r.data()+36) == 4096.);
+                if (r[1] == 0x87) assert(r[44] == 1);
+                Wire.responses.push_back(frame(r[1], id));
+            }
+        };
+        before = Wire.transactions;
+        assert(!initialize(static_cast<Orientation>(2)) && c.lastError().failure == KinisiFailure::INVALID_ARGUMENT);
+        assert(Wire.transactions == before);
+        bool legacy = c.initialize_mecanum_platform(true,false,true,false,false,true,false,true,.34,.26,.1,4096.);
+        assert(legacy == (KINISI_WIRE_BUFFER_SIZE >= 44));
+        if (!legacy) assert(c.lastError().failure == KinisiFailure::FRAME_TOO_LARGE);
+        assert(Wire.transactions == before + size_t(legacy));
+        assert(initialize(Orientation::MIRRORED) == (KINISI_WIRE_BUFFER_SIZE >= 45));
+        if (KINISI_WIRE_BUFFER_SIZE < 45) assert(c.lastError().failure == KinisiFailure::FRAME_TOO_LARGE);
+        assert(Wire.transactions == before + size_t(legacy) + size_t(KINISI_WIRE_BUFFER_SIZE >= 45));
+        assert(c.getMecanumRollerOrientation(applied) && applied == Orientation::MIRRORED);
+    }
+}
+
 int main() {
+    mecanum_roller_orientation();
     board_mounting();
     imu_mounting();
     feedback_health();

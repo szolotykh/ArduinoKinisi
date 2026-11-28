@@ -27,7 +27,7 @@ int main() {
     };
     KinisiController c;
     assert(c.begin() && c.ready());
-    assert(c.boardInfo().protocol_major==2 && c.boardInfo().board_model==1);
+    assert(c.boardInfo().protocol_major==2 && c.boardInfo().protocol_minor>=25 && c.boardInfo().board_model==1);
     assert(c.boardProfile() && c.boardProfile()->minor == 3);
     assert(c.boardProfile()->resources.gpio == 10);
     c.get_temperature(0);

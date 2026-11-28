@@ -289,10 +289,27 @@ bool KinisiProtocol::validateVelocityTuning(uint8_t command, double kp, double k
     return true;
 }
 
+bool KinisiProtocol::getMecanumRollerOrientation(KinisiMecanumRollerOrientation& orientation) {
+    const uint8_t field[] = {7, 0};
+    uint8_t response[8];
+    if (!request(KINISI_GET_CONFIGURATION_FIELD, field, sizeof(field), response, sizeof(response))) return false;
+    const uint64_t bits = kinisi_codec::readUnsigned(response, sizeof(response));
+    if (bits == 0) orientation = KinisiMecanumRollerOrientation::STANDARD;
+    else if (bits == UINT64_C(0x3ff0000000000000)) orientation = KinisiMecanumRollerOrientation::MIRRORED;
+    else return fail(KinisiFailure::MALFORMED_RESPONSE, KINISI_GET_CONFIGURATION_FIELD, 0);
+    return true;
+}
+
 bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t length,
                              uint8_t* response, uint8_t response_length) {
     error_ = {};
     if (!ready_) return fail(KinisiFailure::NOT_READY, command, 0);
+    const bool orientation_field = command == KINISI_GET_CONFIGURATION_FIELD && length == 2 &&
+                                   payload[0] == 7 && payload[1] == 0;
+    if (orientation_field && identity_.protocol_minor < 25) {
+        memset(response, 0, response_length); // Older firmware has one fixed roller arrangement.
+        return true;
+    }
     uint8_t required_minor = 0;
     switch (command) {
         case KINISI_INITIALIZE_MOTOR_POSITION_CONTROLLER:
@@ -308,6 +325,7 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         case KINISI_GET_IMU: required_minor = 5; break;
         case KINISI_GET_MOTOR_CURRENT_LIMIT:
         case KINISI_SET_MOTOR_CURRENT_LIMIT: required_minor = 11; break;
+        case KINISI_INITIALIZE_MECANUM_PLATFORM_ORIENTED: required_minor = 25; break;
         case KINISI_SAVE_CONFIGURATION:
         case KINISI_GET_CONFIGURATION_FIELD: required_minor = 14; break;
         case KINISI_SET_DRIVER_SLEEP:
@@ -327,7 +345,7 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     }
     if (identity_.protocol_minor < required_minor)
         return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
-    if ((command == KINISI_SAVE_CONFIGURATION || command == KINISI_GET_CONFIGURATION_FIELD) &&
+    if ((command == KINISI_SAVE_CONFIGURATION || (command == KINISI_GET_CONFIGURATION_FIELD && !orientation_field)) &&
         !supportsConfigurationSave())
         return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
     if (command == KINISI_SET_DRIVER_SLEEP || command == KINISI_GET_DRIVER_SLEEP) {

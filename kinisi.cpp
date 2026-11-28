@@ -1097,6 +1097,27 @@ board_mount_configuration KinisiController::get_board_mount() {
     return result;
 }
 
+/** Encode INITIALIZE_MECANUM_PLATFORM_ORIENTED, match its reply, and decode the payload. */
+bool KinisiController::initialize_mecanum_platform_oriented(bool is_reversed_0, bool is_reversed_1, bool is_reversed_2, bool is_reversed_3, bool is_encoder_reversed_0, bool is_encoder_reversed_1, bool is_encoder_reversed_2, bool is_encoder_reversed_3, double length, double width, double wheels_diameter, double encoder_resolution, KinisiMecanumRollerOrientation roller_orientation) {
+    if (roller_orientation != KinisiMecanumRollerOrientation::STANDARD && roller_orientation != KinisiMecanumRollerOrientation::MIRRORED)
+        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_INITIALIZE_MECANUM_PLATFORM_ORIENTED, 0);
+    uint8_t payload[41] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(is_reversed_0), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(is_reversed_1), 1);
+    kinisi_codec::writeUnsigned(payload + 2, static_cast<uint64_t>(is_reversed_2), 1);
+    kinisi_codec::writeUnsigned(payload + 3, static_cast<uint64_t>(is_reversed_3), 1);
+    kinisi_codec::writeUnsigned(payload + 4, static_cast<uint64_t>(is_encoder_reversed_0), 1);
+    kinisi_codec::writeUnsigned(payload + 5, static_cast<uint64_t>(is_encoder_reversed_1), 1);
+    kinisi_codec::writeUnsigned(payload + 6, static_cast<uint64_t>(is_encoder_reversed_2), 1);
+    kinisi_codec::writeUnsigned(payload + 7, static_cast<uint64_t>(is_encoder_reversed_3), 1);
+    kinisi_codec::writeDouble(payload + 8, length);
+    kinisi_codec::writeDouble(payload + 16, width);
+    kinisi_codec::writeDouble(payload + 24, wheels_diameter);
+    kinisi_codec::writeDouble(payload + 32, encoder_resolution);
+    kinisi_codec::writeUnsigned(payload + 40, static_cast<uint64_t>(roller_orientation), 1);
+    return request(KINISI_INITIALIZE_MECANUM_PLATFORM_ORIENTED, payload, 41, nullptr, 0);
+}
+
 KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_status& status,
         feedback_source_vector& pose, feedback_source_vector& twist) {
     status = {}; pose = {}; twist = {};

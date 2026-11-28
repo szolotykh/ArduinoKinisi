@@ -5,12 +5,27 @@ identifies the SDK as Arduino 2.5.0, reads the controller identity, and waits fo
 READY. `boardInfo()` exposes hardware revision, protocol version and firmware Git
 build identity; `ready()` reports session readiness.
 
-The library includes protocol 2.11 commands while accepting firmware 2.1+ within
+The library includes protocol 2.25 commands while accepting firmware 2.1+ within
 protocol major 2. Major versions break existing wire interfaces and must match.
 Minor versions add compatible commands; patch versions provide compatible fixes
 and do not block connection. New commands are gated individually. Protocol
 versions are independent of SDK releases and physical board revisions; INIT
 does not translate between major versions.
+
+## Four-wheel mecanum layout over Wire
+
+`initialize_mecanum_platform(...)` selects the standard arrangement. Its complete I²C write is 44 bytes. Protocol 2.25 adds `initialize_mecanum_platform_oriented(..., layout)`, requiring 45 bytes in one write. Both exceed the default 32-byte AVR Wire buffer. On such a host the SDK returns `FRAME_TOO_LARGE` before transmission. Use a Wire implementation with sufficient actual TX capacity and a matching `KINISI_WIRE_BUFFER_SIZE`, or configure over USB with the Python SDK. The 6-byte orientation query and 12-byte reply fit the default Wire buffer. On pre-2.25 firmware the SDK returns the fixed `STANDARD` layout locally.
+
+```cpp
+using Layout = KinisiMecanumRollerOrientation;
+if (!controller.initialize_mecanum_platform_oriented(
+        false, false, false, false, false, false, false, false,
+        0.34, 0.26, 0.10, 4096, Layout::MIRRORED)) return;
+Layout applied;
+if (!controller.getMecanumRollerOrientation(applied)) return;
+```
+
+Motor and encoder indices 0–3 are front right, rear right, rear left and front left. Length and width are the front-to-rear and side-to-side wheel-center spacings in metres. The mirrored layout needs unequal spacings to control yaw. Each wheel's motor and encoder reversal settings remain independent.
 
 The SDK advertises subscription support and **no wall-clock capability**. The board
 uses uptime and skips time-sync exchanges, including periodic sync. Call `poll()`

@@ -108,6 +108,7 @@ static const uint8_t KINISI_SET_IMU_MOUNT = 0x6e;
 static const uint8_t KINISI_GET_IMU_MOUNT = 0x6f;
 static const uint8_t KINISI_SET_BOARD_MOUNT = 0x85;
 static const uint8_t KINISI_GET_BOARD_MOUNT = 0x86;
+static const uint8_t KINISI_INITIALIZE_MECANUM_PLATFORM_ORIENTED = 0x87;
 static const int32_t KINISI_MOUNT_READ_OFFSET_MAX_UM = 10031098L;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
@@ -414,6 +415,10 @@ enum class KinisiSubscriptionTrigger : uint8_t {
 enum class KinisiSubscriptionDelivery : uint8_t {
     ALL = 0,
     ON_CHANGE = 1,
+};
+enum class KinisiMecanumRollerOrientation : uint8_t {
+    STANDARD = 0,
+    MIRRORED = 1,
 };
 enum class KinisiFusionMode : uint8_t {
     LEGACY_ENCODER = 0,

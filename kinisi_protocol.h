@@ -65,6 +65,8 @@ public:
     const KinisiPwmFrequencyOptions* getPwmFrequencyOptions() const;
     bool supportsPwmFrequency() const;
     bool supportsConfigurationSave() const;
+    /** Read the configured mecanum layout. Firmware before 2.25 always uses STANDARD. */
+    bool getMecanumRollerOrientation(KinisiMecanumRollerOrientation& orientation);
     /** Require READY and an exact profile: v0.3/Nano protocol 2.17+, v0.4 protocol 2.15+. */
     bool supportsDriverSleep() const;
     /** Require READY and an exact idle-capable profile: v0.3/Nano 2.18+, v0.4 2.16+. */
