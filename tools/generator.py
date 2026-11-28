@@ -12,13 +12,104 @@ INTERNAL = {'INIT', 'TIME_SYNC_RESPONSE'}
 HEADER = '// Generated from tools/commands.json; edit the schema or generator instead.\n'
 # Keep dependencies of the handwritten session while allowing new schema commands.
 SESSION_COMMANDS = {'PING', 'SET_HEARTBEAT_CONFIG', 'SUBSCRIBE_ODOMETRY',
+                    'SET_IMU_MOUNT', 'GET_IMU_MOUNT', 'SET_BOARD_MOUNT', 'GET_BOARD_MOUNT',
+                    'SET_DRIVER_SLEEP', 'GET_DRIVER_SLEEP',
+                    'SET_BOARD_IDLE', 'GET_BOARD_IDLE',
+                    'SAVE_CONFIGURATION', 'GET_CONFIGURATION_FIELD',
                     'UNSUBSCRIBE_ODOMETRY', 'ENCODER_ODOMETRY_EVENT',
                     'PLATFORM_ODOMETRY_EVENT', 'POLL_TELEMETRY', 'GET_TEMPERATURE', 'GET_IMU',
                     'GET_MOTOR_CURRENT', 'GET_MOTOR_FAULTS', 'CLEAR_MOTOR_FAULTS', 'GET_PWM_FREQUENCY', 'SET_PWM_FREQUENCY', 'GET_MOTOR_CURRENT_LIMIT', 'SET_MOTOR_CURRENT_LIMIT', 'SUBSCRIBE', 'SUBSCRIBE_WITH_MODE', 'UNSUBSCRIBE', 'TELEMETRY_EVENT', 'SUBSCRIBE_CONFIGURED'}
 
 
 
+
+FUSION_CATALOGS = [
+    ('fusion_modes', 'FusionMode', 'FUSION_MODE', ['LEGACY_ENCODER', 'ENCODER_CORRECTION', 'FUSED']),
+    ('fusion_health', 'FusionHealth', 'FUSION_HEALTH', ['DISABLED', 'WAITING', 'HEALTHY', 'FAULT']),
+    ('fusion_faults', 'FusionFault', 'FUSION_FAULT', ['NONE', 'MOUNT_INVALID', 'ENCODER_UNAVAILABLE', 'IMU_UNAVAILABLE', 'STALE', 'TIMESTAMP', 'SATURATION', 'BIAS_NOT_READY', 'DISCONTINUITY', 'INHIBITED']),
+    ('fusion_flags', 'FusionFlag', 'FUSION_FLAG', ['ESTIMATE_VALID', 'BIAS_READY', 'FRESH_TARGET_REQUIRED', 'CORRECTION_ACTIVE']),
+    ('fusion_vectors', 'FusionVectorKind', 'FUSION_VECTOR', ['ENCODER_POSE', 'ENCODER_TWIST', 'FUSED_POSE', 'FUSED_TWIST', 'BIAS']),
+]
+
+IMU_TRACKING_CATALOGS = [('imu_tracking_actions', 'ImuTrackingAction', 'IMU_TRACKING_ACTION', ['START', 'STOP', 'RESET', 'RECALIBRATE']), ('imu_tracking_states', 'ImuTrackingState', 'IMU_TRACKING_STATE', ['STOPPED', 'CALIBRATING', 'TRACKING', 'FAULT', 'EXPIRED']), ('imu_tracking_faults', 'ImuTrackingFault', 'IMU_TRACKING_FAULT', ['NONE', 'NOT_STATIONARY', 'IMU_UNAVAILABLE', 'STALE', 'TIMESTAMP', 'SATURATION', 'BIAS_NOT_READY', 'WINDOW_EXPIRED', 'INHIBITED', 'MOUNT_INVALID']), ('imu_tracking_flags', 'ImuTrackingFlag', 'IMU_TRACKING_FLAG', ['ESTIMATE_VALID', 'BIAS_READY', 'RESTART_REQUIRED', 'MOUNT_CONFIRMED']), ('imu_tracking_vectors', 'ImuTrackingVectorKind', 'IMU_TRACKING_VECTOR', ['POSE', 'TWIST', 'BIAS'])]
+
+FEEDBACK_CATALOGS = [
+    ('feedback_sources', 'FeedbackSource', 'FEEDBACK_SOURCE', ['ENCODER', 'IMU_ONLY', 'FUSED', 'NONE']),
+    ('feedback_source_reasons', 'FeedbackSourceReason', 'FEEDBACK_SOURCE_REASON',
+     ['OK', 'NOT_STARTED', 'CALIBRATING', 'UNAVAILABLE', 'STALE', 'EXPIRED', 'FAULT', 'INHIBITED', 'WAITING_SAMPLE', 'MOUNT_REQUIRED']),
+    ('feedback_source_vectors', 'FeedbackSourceVectorKind', 'FEEDBACK_SOURCE_VECTOR', ['POSE', 'TWIST']),
+]
+
+
+HEALTH_CATALOGS = [
+    ('feedback_source_health_states', 'FeedbackSourceHealthState', 'FEEDBACK_HEALTH',
+     ['HEALTHY', 'SUSPECT', 'UNAVAILABLE', 'INDETERMINATE']),
+    ('feedback_source_health_flags', 'FeedbackSourceHealthFlag', 'FEEDBACK_HEALTH_FLAG',
+     ['PROVENANCE', 'FRESH', 'DISAGREEMENT', 'COMPARISON_AVAILABLE', 'RECOVERING',
+      'RESTART_REQUIRED', 'TIMESTAMP_FAULT', 'SATURATION']),
+]
+
+
+def validate_feedback_health(schema):
+    commands = {c['command'] for c in schema['commands']}
+    required = {'GET_FEEDBACK_SOURCE_HEALTH', 'GET_FEEDBACK_IMU_CHANNELS'}
+    if not commands & required and not any(key in schema for key, *_ in HEALTH_CATALOGS):
+        return
+    if not required <= commands:
+        raise ValueError('Incomplete feedback health command family')
+    for key, _, _, names in HEALTH_CATALOGS:
+        values = schema.get(key, [])
+        ids = [1 << i for i in range(len(names))] if key.endswith('_flags') else range(len(names))
+        if [(v.get('id'), v.get('name')) for v in values] != list(zip(ids, names)) or any(type(v.get('id')) is not int for v in values):
+            raise ValueError('Invalid ' + key + ' catalog')
+
+
+def validate_feedback_source(schema):
+    required = {'SET_FEEDBACK_SOURCE', 'GET_FEEDBACK_SOURCE_STATUS', 'GET_FEEDBACK_SOURCE_VECTOR',
+                'SET_FEEDBACK_FUSION_MOUNT', 'GET_FEEDBACK_FUSION_MOUNT'}
+    commands = {c['command'] for c in schema['commands']}
+    if not required & commands and not any(key in schema for key, *_ in FEEDBACK_CATALOGS):
+        return
+    if not required <= commands:
+        raise ValueError('Incomplete feedback source command family')
+    for key, _, _, names in FEEDBACK_CATALOGS:
+        ids = [0, 1, 2, 255] if key == 'feedback_sources' else list(range(len(names)))
+        values = schema.get(key, [])
+        if [(v.get('id'), v.get('name')) for v in values] != list(zip(ids, names)) or any(type(v.get('id')) is not int for v in values):
+            raise ValueError('Invalid ' + key + ' catalog')
+
+
+def validate_imu_tracking(schema):
+    commands = {c["command"] for c in schema.get("commands", [])}
+    required = {"SET_IMU_TRACKING", "GET_IMU_TRACKING_STATUS", "GET_IMU_TRACKING_VECTOR", "GET_IMU_TRACKING_CONFIGURATION"}
+    if not commands & required and not any(key in schema for key, *_ in IMU_TRACKING_CATALOGS):
+        return
+    if not required <= commands:
+        raise ValueError("Incomplete IMU tracking command family")
+    for key, _, _, names in IMU_TRACKING_CATALOGS:
+        ids = [1, 2, 4, 8] if key.endswith("_flags") else list(range(len(names)))
+        values = schema.get(key, [])
+        if [(v.get("id"), v.get("name")) for v in values] != list(zip(ids, names)) or any(type(v.get("id")) is not int for v in values):
+            raise ValueError("Invalid " + key + " catalog")
+
+def validate_fusion(schema):
+    commands = {c['command'] for c in schema.get('commands', [])}
+    required = {'SET_FUSION_EXPERIMENT', 'GET_FUSION_STATUS', 'GET_FUSION_VECTOR', 'GET_FUSION_CONFIGURATION'}
+    if not commands & required and not any(key in schema for key, *_ in FUSION_CATALOGS):
+        return
+    if not required <= commands:
+        raise ValueError('Incomplete fusion command family')
+    for key, _, _, names in FUSION_CATALOGS:
+        ids = [1, 2, 4, 8] if key == 'fusion_flags' else list(range(len(names)))
+        values = schema.get(key, [])
+        if [(v.get('id'), v.get('name')) for v in values] != list(zip(ids, names)) or any(type(v.get('id')) is not int for v in values):
+            raise ValueError('Invalid ' + key + ' catalog')
+
 def validate_pwm_frequency(schema):
+    validate_fusion(schema)
+    validate_imu_tracking(schema)
+    validate_feedback_source(schema)
+    validate_feedback_health(schema)
     values = schema.get('pwm_frequencies', [])
     expected = [(v, 'KHZ_' + str(v // 1000)) for v in (10000, 20000, 25000, 50000, 100000)]
     if [(v.get('id'), v.get('name')) for v in values] != expected or any(type(v.get('id')) is not int for v in values):
@@ -68,6 +159,8 @@ def generate(schema, output, check=False):
         if 'retired' in c:
             types.append('/** @deprecated ' + retirement_notice(c) + ' */\n')
         types.append(f"static const uint8_t KINISI_{c['command']} = {c['code']};\n")
+    read_offset = next(p for p in objects['board_mount_configuration']['properties'] if p['name'] == 'x_um')
+    types.append(f"static const int32_t KINISI_MOUNT_READ_OFFSET_MAX_UM = {read_offset['range'][1]}L;\n")
     types.append('\n/** Shared controller error codes; see commands.json for per-command errors. */\nenum class KinisiErrorCode : uint8_t {\n    NONE = 0,\n')
     for e in schema['error_codes']:
         types.append(f"    {e['name']} = {e['code']}, // {e['description']}\n")
@@ -77,8 +170,9 @@ def generate(schema, output, check=False):
         for p in o['properties']:
             types.append(f"    {p['type']} {p['name']}; ///< {p['description']}\n")
         types.append('};\n')
-    for key, name in [('subscription_triggers', 'KinisiSubscriptionTrigger'), ('subscription_deliveries', 'KinisiSubscriptionDelivery')]:
-        types.append(f'enum class {name} : uint8_t {{\n')
+    for key, name in [('subscription_triggers', 'KinisiSubscriptionTrigger'), ('subscription_deliveries', 'KinisiSubscriptionDelivery'), ('mecanum_roller_orientations', 'KinisiMecanumRollerOrientation'), ('omni_wheel_orientations', 'KinisiOmniWheelOrientation')] + [(key, 'Kinisi' + name) for key, name, _, _ in FUSION_CATALOGS + IMU_TRACKING_CATALOGS + FEEDBACK_CATALOGS + HEALTH_CATALOGS]:
+        width = 'uint32_t' if key == 'feedback_source_health_flags' else 'uint8_t'
+        types.append(f'enum class {name} : {width} {{\n')
         for item in schema.get(key, []):
             types.append(f"    {item['name']} = {item['id']},\n")
         types.append('};\n')
@@ -148,7 +242,11 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
         source.append('\nbool kinisiTopicEventSupported(KinisiTopic topic) { return ' + (' || '.join('uint8_t(topic) == ' + str(i) for i in event_ids) or 'false') + '; }\n')
     for c in public_commands(schema):
         props = c.get('properties', [])
-        args = ', '.join(({'telemetry_topic': 'KinisiTopic', 'subscription_mode': 'KinisiSubscriptionMode', 'subscription_trigger': 'KinisiSubscriptionTrigger', 'subscription_delivery': 'KinisiSubscriptionDelivery', 'pwm_frequency': 'KinisiPwmFrequency'}.get(p.get('enum'), p['type'])) + ' ' + p['name'] for p in props)
+        enum_types = {'telemetry_topic': 'KinisiTopic', 'subscription_mode': 'KinisiSubscriptionMode',
+                      'subscription_trigger': 'KinisiSubscriptionTrigger', 'subscription_delivery': 'KinisiSubscriptionDelivery',
+                      'pwm_frequency': 'KinisiPwmFrequency', 'roller_orientation': 'KinisiMecanumRollerOrientation',
+                      'wheel_orientation': 'KinisiOmniWheelOrientation'}
+        args = ', '.join(enum_types.get(p.get('enum', p['name']), p['type']) + ' ' + p['name'] for p in props)
         if c['command'] == 'SUBSCRIBE':
             args += ', KinisiSubscriptionMode mode'
         velocity = c['command'] in ('INITIALIZE_MOTOR_CONTROLLER', 'START_PLATFORM_CONTROLLER')
@@ -166,18 +264,30 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
             source.append('    if (mode != KinisiSubscriptionMode::PERIODIC) return subscribe_with_mode(topic_id, index, interval_ms, mode);\n')
         if velocity:
             source.append(f'    if (!validateVelocityTuning(KINISI_{c["command"]}, kp, ki, kd, integral_limit)) return false;\n')
+        if c['command'] == 'INITIALIZE_OMNI_PLATFORM_ORIENTED':
+            source.append('    if (wheel_orientation != KinisiOmniWheelOrientation::REAR && wheel_orientation != KinisiOmniWheelOrientation::FRONT)\n        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_INITIALIZE_OMNI_PLATFORM_ORIENTED, 0);\n')
+        if c['command'] == 'INITIALIZE_MECANUM_PLATFORM_ORIENTED':
+            source.append('    if (roller_orientation != KinisiMecanumRollerOrientation::STANDARD && roller_orientation != KinisiMecanumRollerOrientation::MIRRORED)\n        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_INITIALIZE_MECANUM_PLATFORM_ORIENTED, 0);\n')
         n = sum(size(p['type']) for p in props)
         source.append(f'    uint8_t payload[{max(n, 1)}] = {{0}};\n')
         offset = 0
         for p in props:
             target = f'payload + {offset}'
             if p['type'] == 'double':
-                source.append(f'    kinisi_codec::writeDouble({target}, {p["name"]});\n')
+                codec = 'writeFusionYaw' if c['command'] in ('SET_FUSION_EXPERIMENT', 'SET_IMU_TRACKING', 'SET_FEEDBACK_FUSION_MOUNT') and p['name'] == 'mounting_yaw_rad' else 'writeDouble'
+                source.append(f'    kinisi_codec::{codec}({target}, {p["name"]});\n')
             else:
                 source.append(f'    kinisi_codec::writeUnsigned({target}, static_cast<uint64_t>({p["name"]}), {size(p["type"])});\n')
             offset += size(p['type'])
         if rt:
             source.append(f'    {rt} result = {{}};\n    uint8_t response[{size(rt)}] = {{0}};\n')
+            if c['command'] == 'GET_FEEDBACK_SOURCE_HEALTH':
+                source.append('    result.source = source;\n'
+                              '    result.health = static_cast<uint8_t>(KinisiFeedbackSourceHealthState::UNAVAILABLE);\n'
+                              '    result.reason = static_cast<uint8_t>(KinisiFeedbackSourceReason::UNAVAILABLE);\n'
+                              '    result.age_us = UINT32_MAX;\n')
+            elif c['command'] == 'GET_FEEDBACK_IMU_CHANNELS':
+                source.append('    result.accel_age_us = UINT32_MAX;\n    result.gyro_age_us = UINT32_MAX;\n')
             source.append(f'    if (!request(KINISI_{c["command"]}, payload, {n}, response, {size(rt)})) return result;\n')
             if rt in objects:
                 offset = 0
@@ -189,11 +299,94 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
             source.append('    return result;\n}\n')
         else:
             source.append(f'    return request(KINISI_{c["command"]}, payload, {n}, nullptr, 0);\n}}\n')
+    if schema.get('feedback_sources'):
+        types.append('enum class KinisiFeedbackRead : uint8_t { VALID, UNAVAILABLE, CHANGED, ERROR };\n')
+        header.append('    /** Return a bracketed sample, or clear both vectors on loss, turnover or transport failure. */\n')
+        header.append('    KinisiFeedbackRead readFeedbackSourceSnapshot(feedback_source_status& status, feedback_source_vector& pose, feedback_source_vector& twist);\n')
+        source.append("""
+KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_status& status,
+        feedback_source_vector& pose, feedback_source_vector& twist) {
+    status = {}; pose = {}; twist = {};
+    for (uint8_t attempt = 0; attempt < 3; ++attempt) {
+        const auto first = get_feedback_source_status();
+        if (lastError().failure != KinisiFailure::NONE) return KinisiFeedbackRead::ERROR;
+        if (!first.valid) { status = first; return KinisiFeedbackRead::UNAVAILABLE; }
+        const auto position = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::POSE, first.origin_id, first.sequence);
+        bool have_vectors = lastError().failure == KinisiFailure::NONE;
+        if (!have_vectors && lastError().code != KinisiErrorCode::SAMPLE_NOT_AVAILABLE) return KinisiFeedbackRead::ERROR;
+        feedback_source_vector velocity{};
+        if (have_vectors) {
+            velocity = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::TWIST, first.origin_id, first.sequence);
+            have_vectors = lastError().failure == KinisiFailure::NONE;
+            if (!have_vectors && lastError().code != KinisiErrorCode::SAMPLE_NOT_AVAILABLE) return KinisiFeedbackRead::ERROR;
+        }
+        const auto last = get_feedback_source_status();
+        if (lastError().failure != KinisiFailure::NONE) return KinisiFeedbackRead::ERROR;
+        if (!last.valid) { status = last; return KinisiFeedbackRead::UNAVAILABLE; }
+        if (!have_vectors || position.sequence != first.sequence || velocity.sequence != first.sequence ||
+            first.requested != last.requested || first.active != last.active || first.origin_id != last.origin_id) continue;
+        const uint32_t advance = last.sequence - first.sequence;
+        if (advance >= UINT32_C(0x80000000) || last.timestamp_us < first.timestamp_us) continue;
+        const uint64_t tick = last.timestamp_us - first.timestamp_us;
+        if (tick > UINT32_MAX || (advance == 0) != (tick == 0)) continue;
+        const uint64_t age = tick + last.age_us;
+        const uint16_t limit_ms = first.max_age_ms < last.max_age_ms ? first.max_age_ms : last.max_age_ms;
+        if (age >= first.age_us && age - first.age_us <= 50000 && age <= uint32_t(limit_ms) * 1000UL) {
+            status = first; status.age_us = static_cast<uint32_t>(age);
+            pose = position; twist = velocity;
+            return KinisiFeedbackRead::VALID;
+        }
+    }
+    return KinisiFeedbackRead::CHANGED;
+}
+""")
+        header.append('    bool set_feedback_source(KinisiFeedbackSource source) { return set_feedback_source(static_cast<uint8_t>(source)); }\n')
+        header.append('    feedback_source_vector get_feedback_source_vector(KinisiFeedbackSourceVectorKind kind, uint32_t origin_id, uint32_t sequence) { return get_feedback_source_vector(static_cast<uint8_t>(kind), origin_id, sequence); }\n')
+    for kind, wire, reference in (
+            ('Board', 'board', 'Tracking origin to PCB underside center in chassis metres.'),
+            ('Imu', 'imu', '@deprecated Chip-referenced mounting. Offsets locate the BMI088 in chassis metres.')):
+        header.append(f'    /** {reference} Angles in degrees. */\n')
+        header.append(f'    bool set{kind}MountGeometry(double roll_deg, double pitch_deg, double yaw_deg, double x_m, double y_m, double z_m);\n')
+        header.append(f'    /** {reference} Read the applied pose and configuration flag. */\n')
+        header.append(f'    bool get{kind}MountGeometry(Kinisi{kind}MountGeometry& mount);\n')
+        source.append(f"""
+bool KinisiController::set{kind}MountGeometry(double roll_deg, double pitch_deg, double yaw_deg,
+        double x_m, double y_m, double z_m) {{
+    if (!(fabs(roll_deg) <= 180 && fabs(pitch_deg) <= 90 && fabs(yaw_deg) <= 180 &&
+          fabs(x_m) <= 10 && fabs(y_m) <= 10 && fabs(z_m) <= 10))
+        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_SET_{wire.upper()}_MOUNT, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    return set_{wire}_mount(lround(roll_deg * 100), lround(pitch_deg * 100), lround(yaw_deg * 100),
+                         lround(x_m * 1000000), lround(y_m * 1000000), lround(z_m * 1000000));
+}}
+
+bool KinisiController::get{kind}MountGeometry(Kinisi{kind}MountGeometry& mount) {{
+    const {wire}_mount_configuration raw = get_{wire}_mount();
+    mount = {{}};
+    if (lastError().failure != KinisiFailure::NONE) return false;
+    mount = {{raw.roll_cdeg / 100.0, raw.pitch_cdeg / 100.0, raw.yaw_cdeg / 100.0,
+             raw.x_um / 1000000.0, raw.y_um / 1000000.0, raw.z_um / 1000000.0, raw.configured}};
+    return true;
+}}
+""")
+    if schema.get('feedback_source_health_states'):
+        header.append('    feedback_source_health get_feedback_source_health(KinisiFeedbackSource source) { return get_feedback_source_health(static_cast<uint8_t>(source)); }\n')
+    if schema.get('imu_tracking_actions'):
+        header.append('    bool set_imu_tracking(KinisiImuTrackingAction action, uint8_t confirmed, double yaw) { return set_imu_tracking(static_cast<uint8_t>(action), confirmed, yaw); }\n')
+        header.append('    imu_tracking_vector get_imu_tracking_vector(KinisiImuTrackingVectorKind kind) { return get_imu_tracking_vector(static_cast<uint8_t>(kind)); }\n')
+    if schema.get('fusion_modes'):
+        header.append('    bool set_fusion_experiment(KinisiFusionMode mode, double yaw) { return set_fusion_experiment(static_cast<uint8_t>(mode), yaw); }\n')
+        header.append('    fusion_vector get_fusion_vector(KinisiFusionVectorKind kind) { return get_fusion_vector(static_cast<uint8_t>(kind)); }\n')
     header.append('};\n#endif\n')
     keywords = '# Generated Arduino syntax map.\nKinisiController\tKEYWORD1\nbegin\tKEYWORD2\nready\tKEYWORD2\nboardInfo\tKEYWORD2\nlastError\tKEYWORD2\n'
     keywords += 'poll\tKEYWORD2\ngetSubscribedEncoderOdometry\tKEYWORD2\ngetSubscribedPlatformOdometry\tKEYWORD2\n'
     keywords += 'boardProfile\tKEYWORD2\nsupportsSensor\tKEYWORD2\nKinisiSensor\tKEYWORD1\nKinisiBoardProfile\tKEYWORD1\n'
     keywords += 'supportsMotorCurrent\tKEYWORD2\nsupportsMotorFaults\tKEYWORD2\n'
+    keywords += 'supportsDriverSleep\tKEYWORD2\n'
+    keywords += 'supportsBoardIdle\tKEYWORD2\n'
+    keywords += 'getOmniWheelOrientation\tKEYWORD2\nKinisiOmniWheelOrientation\tKEYWORD1\n'
+    keywords += 'getMecanumRollerOrientation\tKEYWORD2\nKinisiMecanumRollerOrientation\tKEYWORD1\n'
+    keywords += 'supportsBoardMounting\tKEYWORD2\nsetBoardMountGeometry\tKEYWORD2\ngetBoardMountGeometry\tKEYWORD2\nKinisiBoardMountGeometry\tKEYWORD1\n'
+    keywords += 'supportsImuMounting\tKEYWORD2\nsetImuMountGeometry\tKEYWORD2\ngetImuMountGeometry\tKEYWORD2\nKinisiImuMountGeometry\tKEYWORD1\n'
     if topics:
         keywords += 'KinisiSubscriptionMode\tKEYWORD1\nKinisiTopic\tKEYWORD1\nKinisiTelemetrySample\tKEYWORD1\nsupportsTopic\tKEYWORD2\ngetSubscriptionSample\tKEYWORD2\n'
     if schema.get('subscription_triggers'):

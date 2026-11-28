@@ -83,6 +83,34 @@ static const uint8_t KINISI_SET_MOTOR_CURRENT_LIMIT = 0x56;
 static const uint8_t KINISI_SUBSCRIBE_CONFIGURED = 0x84;
 static const uint8_t KINISI_GET_PWM_FREQUENCY = 0x57;
 static const uint8_t KINISI_SET_PWM_FREQUENCY = 0x58;
+static const uint8_t KINISI_SAVE_CONFIGURATION = 0x59;
+static const uint8_t KINISI_GET_CONFIGURATION_FIELD = 0x5A;
+static const uint8_t KINISI_SET_DRIVER_SLEEP = 0x5B;
+static const uint8_t KINISI_GET_DRIVER_SLEEP = 0x5C;
+static const uint8_t KINISI_SET_BOARD_IDLE = 0x5D;
+static const uint8_t KINISI_GET_BOARD_IDLE = 0x5E;
+static const uint8_t KINISI_SET_FUSION_EXPERIMENT = 0x5f;
+static const uint8_t KINISI_GET_FUSION_STATUS = 0x60;
+static const uint8_t KINISI_GET_FUSION_VECTOR = 0x61;
+static const uint8_t KINISI_GET_FUSION_CONFIGURATION = 0x62;
+static const uint8_t KINISI_SET_IMU_TRACKING = 0x63;
+static const uint8_t KINISI_GET_IMU_TRACKING_STATUS = 0x64;
+static const uint8_t KINISI_GET_IMU_TRACKING_VECTOR = 0x65;
+static const uint8_t KINISI_GET_IMU_TRACKING_CONFIGURATION = 0x66;
+static const uint8_t KINISI_SET_FEEDBACK_SOURCE = 0x67;
+static const uint8_t KINISI_GET_FEEDBACK_SOURCE_STATUS = 0x68;
+static const uint8_t KINISI_GET_FEEDBACK_SOURCE_VECTOR = 0x69;
+static const uint8_t KINISI_SET_FEEDBACK_FUSION_MOUNT = 0x6a;
+static const uint8_t KINISI_GET_FEEDBACK_FUSION_MOUNT = 0x6b;
+static const uint8_t KINISI_GET_FEEDBACK_SOURCE_HEALTH = 0x6c;
+static const uint8_t KINISI_GET_FEEDBACK_IMU_CHANNELS = 0x6d;
+static const uint8_t KINISI_SET_IMU_MOUNT = 0x6e;
+static const uint8_t KINISI_GET_IMU_MOUNT = 0x6f;
+static const uint8_t KINISI_SET_BOARD_MOUNT = 0x85;
+static const uint8_t KINISI_GET_BOARD_MOUNT = 0x86;
+static const uint8_t KINISI_INITIALIZE_MECANUM_PLATFORM_ORIENTED = 0x87;
+static const uint8_t KINISI_INITIALIZE_OMNI_PLATFORM_ORIENTED = 0x88;
+static const int32_t KINISI_MOUNT_READ_OFFSET_MAX_UM = 10031098L;
 
 /** Shared controller error codes; see commands.json for per-command errors. */
 enum class KinisiErrorCode : uint8_t {
@@ -105,6 +133,9 @@ enum class KinisiErrorCode : uint8_t {
     SENSOR_NOT_AVAILABLE = 16, // The selected sensor is not defined on this board.
     SUBSCRIPTION_LIMIT = 17, // This connection has no free subscription slots; unsubscribe an existing source first.
     SAMPLE_OUT_OF_RANGE = 18, // The sensor reading is saturated; no valid measurement can be returned.
+    DRIVERS_ASLEEP = 19, // Driver sleep is active. Explicitly wake the drivers before requesting this operation.
+    BOARD_IDLE = 20, // Board idle is active. Explicitly wake the board before changing driver sleep or starting a subscription.
+    SOURCE_SWITCH_UNSAFE = 21, // Stop all motor outputs, disarm all controllers and wait for stationary wheel observations before changing the tracking preference.
 };
 
 /** The state of the controller for the specified motor. */
@@ -253,6 +284,131 @@ struct motor_current_limit {
     bool enabled; ///< Current regulation is enabled on both outputs.
     uint16_t threshold_ma; ///< Nominal threshold in milliamps.
 };
+
+/** Volatile v0.4 fusion experiment diagnostics; see command descriptions. */
+struct fusion_status {
+    uint8_t mode; ///< Selected fusion_modes value.
+    uint8_t health; ///< Current fusion_health value.
+    uint8_t fault; ///< Current fusion_faults reason, or NONE.
+    uint8_t flags; ///< Bitmask of fusion_flags; ESTIMATE_VALID is required before using estimates.
+    uint32_t sequence; ///< Snapshot sequence; compare with each vector before associating this status.
+    uint64_t timestamp_us; ///< Monotonic board microseconds of this estimate snapshot; not wall time.
+    uint32_t accel_age_us; ///< UINT32_MAX means unavailable.
+    uint32_t gyro_age_us; ///< UINT32_MAX means unavailable.
+    uint32_t encoder_age_us; ///< UINT32_MAX means unavailable.
+};
+
+/** Volatile v0.4 fusion experiment diagnostics; see command descriptions. */
+struct fusion_vector {
+    uint32_t sequence; ///< Match GET_FUSION_STATUS sequence before associating its timestamp or health.
+    double x; ///< Pose X in metres, twist X in metres per second, or X accelerometer bias in metres per second squared, selected by kind.
+    double y; ///< Pose Y in metres, twist Y in metres per second, or Y accelerometer bias in metres per second squared, selected by kind.
+    double z; ///< Pose yaw in radians, twist yaw rate in radians per second, or Z gyro bias in radians per second, selected by kind.
+};
+
+/** Volatile v0.4 fusion experiment diagnostics; see command descriptions. */
+struct fusion_configuration {
+    uint8_t mode; ///< Selected fusion_modes value; boot default is LEGACY_ENCODER.
+    double mounting_yaw_rad; ///< Angle of board +X in the chassis XY plane, counterclockwise about chassis +Z; finite radians in [-pi, pi].
+};
+
+/** Volatile IMU-only relative tracking diagnostics. */
+struct imu_tracking_status {
+    uint8_t state; ///< ImuTrackingState value.
+    uint8_t fault; ///< ImuTrackingFault value.
+    uint8_t flags; ///< ImuTrackingFlag bitmask.
+    uint8_t reserved; ///< Reserved; must be zero.
+    uint32_t sequence; ///< Snapshot sequence; match vector reads.
+    uint64_t timestamp_us; ///< Last eligible monotonic joint accel/gyro source watermark; no published watermark reaches origin + window_us. Zero before the first estimate.
+    uint32_t elapsed_us; ///< Wall elapsed microseconds since the source origin, capped at window_us; distinct from the retained source watermark. Frozen on fault or expiry; STOP clears it.
+    uint32_t accel_age_us; ///< Accel age in microseconds; UINT32_MAX if unavailable.
+    uint32_t gyro_age_us; ///< Gyro age in microseconds; UINT32_MAX if unavailable.
+};
+
+/** Volatile IMU-only relative tracking diagnostics. */
+struct imu_tracking_vector {
+    uint32_t sequence; ///< Match status sequence before associating health and time.
+    double x; ///< Pose X, body velocity X, or acceleration bias X, selected by kind.
+    double y; ///< Pose Y, body velocity Y, or acceleration bias Y, selected by kind.
+    double z; ///< Pose yaw, body yaw rate, or gyro Z bias, selected by kind.
+};
+
+/** Volatile IMU-only relative tracking diagnostics. */
+struct imu_tracking_configuration {
+    double mounting_yaw_rad; ///< Declared supported mounting yaw in radians.
+    uint32_t window_us; ///< Actual source tracking horizon in microseconds; 1000000 for this v0.4 release. Eligible source times are [origin, origin + window_us).
+};
+
+/** Board-wide selected tracking telemetry status. */
+struct feedback_source_status {
+    uint8_t requested; ///< Requested FeedbackSource.
+    uint8_t active; ///< Active FeedbackSource, NONE while invalid.
+    uint8_t valid; ///< One when a current source snapshot is available, otherwise zero.
+    uint8_t reason; ///< FeedbackSourceReason.
+    uint32_t sequence; ///< Underlying sample sequence when valid; zero when invalid.
+    uint64_t timestamp_us; ///< Underlying monotonic board sample time; zero when invalid.
+    uint32_t origin_id; ///< Board-local frame generation. Discard prior coordinates on change or board reboot.
+    uint8_t source_detail; ///< Native IMU tracking or fusion fault code for the requested source; zero otherwise.
+    uint32_t age_us; ///< Board-clock sample age in microseconds; UINT32_MAX when unavailable.
+    uint16_t max_age_ms; ///< Maximum eligible captured sample age in milliseconds for this source, including the configured encoder period. Compare updated original sample age with the smaller of its captured and current limits.
+};
+
+/** Selected source vector in the selector pose frame or native body twist frame. */
+struct feedback_source_vector {
+    uint32_t sequence; ///< Exact producer sequence captured by status and requested by the vector command.
+    double x; ///< X coordinate or body X velocity.
+    double y; ///< Y coordinate or body Y velocity.
+    double z; ///< Continuous relative yaw or body yaw rate.
+};
+
+/** Passive tracking mount, independent of chassis control. */
+struct feedback_fusion_mount {
+    uint8_t confirmed; ///< One after an explicit mount declaration this boot.
+    double mounting_yaw_rad; ///< Angle of board +X in chassis XY, counterclockwise about +Z in radians. A centered, level board with +Z up is required only for a yaw-only installation.
+};
+
+/** Read producer health independently of selector and control. ENCODER is the running platform encoder batch, IMU_ONLY is physical BMI088 pair availability independent of the one-second estimate, FUSED is the passive fused estimate. Disagreement indicates conflicting observations without assigning sensor blame. HEALTHY means directly usable data. Comparability is separate. Historical provenance remains readable during failure. Reconnect reads board state. */
+struct feedback_source_health {
+    uint8_t source; ///< Echo of FeedbackSource request.
+    uint8_t health; ///< FeedbackSourceHealthState.
+    uint8_t reason; ///< FeedbackSourceReason for current producer availability.
+    uint8_t detail; ///< FusionFault explanation if present.
+    uint32_t flags; ///< FeedbackSourceHealthFlag bit mask.
+    uint32_t sequence; ///< Sequence of the last producer publication or observed distinct raw IMU pair, wrapping modulo 2^32; use PROVENANCE for presence.
+    uint64_t timestamp_us; ///< Last usable source time in board uptime microseconds. For the BMI088 pair this is its older die timestamp.
+    uint32_t age_us; ///< Age of that timestamp in board uptime microseconds, UINT32_MAX if absent, future or too old to represent.
+    uint32_t max_age_us; ///< Source freshness budget in microseconds.
+};
+
+/** Read independent last observed accelerometer and gyro acquisition times in board uptime microseconds. A timestamp of zero and age UINT32_MAX indicate no observed acquisition. These are physical source observations, independent of the finite IMU-only tracking window. A pair must meet the 35000 us age and 15000 us skew limits. */
+struct feedback_imu_channels {
+    uint64_t accel_timestamp_us; ///< Last observed accelerometer acquisition time in board uptime microseconds.
+    uint64_t gyro_timestamp_us; ///< Last observed gyro acquisition time in board uptime microseconds.
+    uint32_t accel_age_us; ///< Board-derived acquisition age in microseconds, UINT32_MAX if unknown.
+    uint32_t gyro_age_us; ///< Board-derived acquisition age in microseconds, UINT32_MAX if unknown.
+};
+
+/** Signed board orientation and displacement to the chip in chassis axes. */
+struct imu_mount_configuration {
+    int16_t roll_cdeg; ///< Board-to-chassis roll in signed hundredths of a degree.
+    int16_t pitch_cdeg; ///< Board-to-chassis pitch in signed hundredths of a degree.
+    int16_t yaw_cdeg; ///< Board-to-chassis yaw in signed hundredths of a degree.
+    int32_t x_um; ///< Signed displacement from the tracking origin to the BMI088 chip along chassis +X (forward), in micrometres. A position derived from the other reference can exceed its setter's 10 m input range.
+    int32_t y_um; ///< Signed displacement from the tracking origin to the BMI088 chip along chassis +Y (left), in micrometres. A position derived from the other reference can exceed its setter's 10 m input range.
+    int32_t z_um; ///< Signed displacement from the tracking origin to the BMI088 chip along chassis +Z (up), in micrometres. A position derived from the other reference can exceed its setter's 10 m input range.
+    bool configured; ///< True after explicit mount setup or restore. False selects legacy per-mode yaw.
+};
+
+/** Applied orientation and chassis-to-PCB underside-center displacement. */
+struct board_mount_configuration {
+    int16_t roll_cdeg; ///< Board-to-chassis roll in signed hundredths of a degree.
+    int16_t pitch_cdeg; ///< Board-to-chassis pitch in signed hundredths of a degree.
+    int16_t yaw_cdeg; ///< Board-to-chassis yaw in signed hundredths of a degree.
+    int32_t x_um; ///< Signed displacement from the tracking origin to the geometric center of the PCB underside along chassis +X (forward), in micrometres. A position derived from the other reference can exceed its setter's 10 m input range.
+    int32_t y_um; ///< Signed displacement from the tracking origin to the geometric center of the PCB underside along chassis +Y (left), in micrometres. A position derived from the other reference can exceed its setter's 10 m input range.
+    int32_t z_um; ///< Signed displacement from the tracking origin to the geometric center of the PCB underside along chassis +Z (up), in micrometres. A position derived from the other reference can exceed its setter's 10 m input range.
+    bool configured; ///< True after explicit mount setup or restore. False selects legacy per-mode yaw.
+};
 enum class KinisiSubscriptionTrigger : uint8_t {
     PERIODIC = 0,
     ON_EVENT = 1,
@@ -260,6 +416,124 @@ enum class KinisiSubscriptionTrigger : uint8_t {
 enum class KinisiSubscriptionDelivery : uint8_t {
     ALL = 0,
     ON_CHANGE = 1,
+};
+enum class KinisiMecanumRollerOrientation : uint8_t {
+    STANDARD = 0,
+    MIRRORED = 1,
+};
+enum class KinisiOmniWheelOrientation : uint8_t {
+    REAR = 0,
+    FRONT = 1,
+};
+enum class KinisiFusionMode : uint8_t {
+    LEGACY_ENCODER = 0,
+    ENCODER_CORRECTION = 1,
+    FUSED = 2,
+};
+enum class KinisiFusionHealth : uint8_t {
+    DISABLED = 0,
+    WAITING = 1,
+    HEALTHY = 2,
+    FAULT = 3,
+};
+enum class KinisiFusionFault : uint8_t {
+    NONE = 0,
+    MOUNT_INVALID = 1,
+    ENCODER_UNAVAILABLE = 2,
+    IMU_UNAVAILABLE = 3,
+    STALE = 4,
+    TIMESTAMP = 5,
+    SATURATION = 6,
+    BIAS_NOT_READY = 7,
+    DISCONTINUITY = 8,
+    INHIBITED = 9,
+};
+enum class KinisiFusionFlag : uint8_t {
+    ESTIMATE_VALID = 1,
+    BIAS_READY = 2,
+    FRESH_TARGET_REQUIRED = 4,
+    CORRECTION_ACTIVE = 8,
+};
+enum class KinisiFusionVectorKind : uint8_t {
+    ENCODER_POSE = 0,
+    ENCODER_TWIST = 1,
+    FUSED_POSE = 2,
+    FUSED_TWIST = 3,
+    BIAS = 4,
+};
+enum class KinisiImuTrackingAction : uint8_t {
+    START = 0,
+    STOP = 1,
+    RESET = 2,
+    RECALIBRATE = 3,
+};
+enum class KinisiImuTrackingState : uint8_t {
+    STOPPED = 0,
+    CALIBRATING = 1,
+    TRACKING = 2,
+    FAULT = 3,
+    EXPIRED = 4,
+};
+enum class KinisiImuTrackingFault : uint8_t {
+    NONE = 0,
+    NOT_STATIONARY = 1,
+    IMU_UNAVAILABLE = 2,
+    STALE = 3,
+    TIMESTAMP = 4,
+    SATURATION = 5,
+    BIAS_NOT_READY = 6,
+    WINDOW_EXPIRED = 7,
+    INHIBITED = 8,
+    MOUNT_INVALID = 9,
+};
+enum class KinisiImuTrackingFlag : uint8_t {
+    ESTIMATE_VALID = 1,
+    BIAS_READY = 2,
+    RESTART_REQUIRED = 4,
+    MOUNT_CONFIRMED = 8,
+};
+enum class KinisiImuTrackingVectorKind : uint8_t {
+    POSE = 0,
+    TWIST = 1,
+    BIAS = 2,
+};
+enum class KinisiFeedbackSource : uint8_t {
+    ENCODER = 0,
+    IMU_ONLY = 1,
+    FUSED = 2,
+    NONE = 255,
+};
+enum class KinisiFeedbackSourceReason : uint8_t {
+    OK = 0,
+    NOT_STARTED = 1,
+    CALIBRATING = 2,
+    UNAVAILABLE = 3,
+    STALE = 4,
+    EXPIRED = 5,
+    FAULT = 6,
+    INHIBITED = 7,
+    WAITING_SAMPLE = 8,
+    MOUNT_REQUIRED = 9,
+};
+enum class KinisiFeedbackSourceVectorKind : uint8_t {
+    POSE = 0,
+    TWIST = 1,
+};
+enum class KinisiFeedbackSourceHealthState : uint8_t {
+    HEALTHY = 0,
+    SUSPECT = 1,
+    UNAVAILABLE = 2,
+    INDETERMINATE = 3,
+};
+enum class KinisiFeedbackSourceHealthFlag : uint32_t {
+    PROVENANCE = 1,
+    FRESH = 2,
+    DISAGREEMENT = 4,
+    COMPARISON_AVAILABLE = 8,
+    RECOVERING = 16,
+    RESTART_REQUIRED = 32,
+    TIMESTAMP_FAULT = 64,
+    SATURATION = 128,
 };
 enum class KinisiPwmFrequency : uint32_t {
     KHZ_10 = 10000UL,
@@ -303,3 +577,4 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
 bool kinisiPwmFrequencyValid(uint32_t frequency);
 #endif
 bool kinisiTopicEventSupported(KinisiTopic topic);
+enum class KinisiFeedbackRead : uint8_t { VALID, UNAVAILABLE, CHANGED, ERROR };

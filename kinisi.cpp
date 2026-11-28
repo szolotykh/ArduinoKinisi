@@ -787,3 +787,423 @@ uint32_t KinisiController::set_pwm_frequency(KinisiPwmFrequency frequency_hz) {
     result = static_cast<uint32_t>(kinisi_codec::readUnsigned(response, 4));
     return result;
 }
+
+/** Encode SAVE_CONFIGURATION, match its reply, and decode the payload. */
+bool KinisiController::save_configuration() {
+    uint8_t payload[1] = {0};
+    return request(KINISI_SAVE_CONFIGURATION, payload, 0, nullptr, 0);
+}
+
+/** Encode GET_CONFIGURATION_FIELD, match its reply, and decode the payload. */
+double KinisiController::get_configuration_field(uint8_t field, uint8_t index) {
+    uint8_t payload[2] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(field), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(index), 1);
+    double result = {};
+    uint8_t response[8] = {0};
+    if (!request(KINISI_GET_CONFIGURATION_FIELD, payload, 2, response, 8)) return result;
+    result = kinisi_codec::readDouble(response);
+    return result;
+}
+
+/** Encode SET_DRIVER_SLEEP, match its reply, and decode the payload. */
+bool KinisiController::set_driver_sleep(uint8_t sleeping) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(sleeping), 1);
+    return request(KINISI_SET_DRIVER_SLEEP, payload, 1, nullptr, 0);
+}
+
+/** Encode GET_DRIVER_SLEEP, match its reply, and decode the payload. */
+uint8_t KinisiController::get_driver_sleep() {
+    uint8_t payload[1] = {0};
+    uint8_t result = {};
+    uint8_t response[1] = {0};
+    if (!request(KINISI_GET_DRIVER_SLEEP, payload, 0, response, 1)) return result;
+    result = static_cast<uint8_t>(kinisi_codec::readUnsigned(response, 1));
+    return result;
+}
+
+/** Encode SET_BOARD_IDLE, match its reply, and decode the payload. */
+bool KinisiController::set_board_idle(uint8_t idle) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(idle), 1);
+    return request(KINISI_SET_BOARD_IDLE, payload, 1, nullptr, 0);
+}
+
+/** Encode GET_BOARD_IDLE, match its reply, and decode the payload. */
+uint8_t KinisiController::get_board_idle() {
+    uint8_t payload[1] = {0};
+    uint8_t result = {};
+    uint8_t response[1] = {0};
+    if (!request(KINISI_GET_BOARD_IDLE, payload, 0, response, 1)) return result;
+    result = static_cast<uint8_t>(kinisi_codec::readUnsigned(response, 1));
+    return result;
+}
+
+/** Encode SET_FUSION_EXPERIMENT, match its reply, and decode the payload. */
+bool KinisiController::set_fusion_experiment(uint8_t mode, double mounting_yaw_rad) {
+    uint8_t payload[9] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(mode), 1);
+    kinisi_codec::writeFusionYaw(payload + 1, mounting_yaw_rad);
+    return request(KINISI_SET_FUSION_EXPERIMENT, payload, 9, nullptr, 0);
+}
+
+/** Encode GET_FUSION_STATUS, match its reply, and decode the payload. */
+fusion_status KinisiController::get_fusion_status() {
+    uint8_t payload[1] = {0};
+    fusion_status result = {};
+    uint8_t response[28] = {0};
+    if (!request(KINISI_GET_FUSION_STATUS, payload, 0, response, 28)) return result;
+    result.mode = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.health = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 1, 1));
+    result.fault = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 2, 1));
+    result.flags = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 3, 1));
+    result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 4, 4));
+    result.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(response + 8, 8));
+    result.accel_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 16, 4));
+    result.gyro_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 20, 4));
+    result.encoder_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 24, 4));
+    return result;
+}
+
+/** Encode GET_FUSION_VECTOR, match its reply, and decode the payload. */
+fusion_vector KinisiController::get_fusion_vector(uint8_t kind) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(kind), 1);
+    fusion_vector result = {};
+    uint8_t response[28] = {0};
+    if (!request(KINISI_GET_FUSION_VECTOR, payload, 1, response, 28)) return result;
+    result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 0, 4));
+    result.x = kinisi_codec::readDouble(response + 4);
+    result.y = kinisi_codec::readDouble(response + 12);
+    result.z = kinisi_codec::readDouble(response + 20);
+    return result;
+}
+
+/** Encode GET_FUSION_CONFIGURATION, match its reply, and decode the payload. */
+fusion_configuration KinisiController::get_fusion_configuration() {
+    uint8_t payload[1] = {0};
+    fusion_configuration result = {};
+    uint8_t response[9] = {0};
+    if (!request(KINISI_GET_FUSION_CONFIGURATION, payload, 0, response, 9)) return result;
+    result.mode = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.mounting_yaw_rad = kinisi_codec::readDouble(response + 1);
+    return result;
+}
+
+/** Encode SET_IMU_TRACKING, match its reply, and decode the payload. */
+bool KinisiController::set_imu_tracking(uint8_t action, uint8_t stationary_mount_confirmed, double mounting_yaw_rad) {
+    uint8_t payload[10] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(action), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(stationary_mount_confirmed), 1);
+    kinisi_codec::writeFusionYaw(payload + 2, mounting_yaw_rad);
+    return request(KINISI_SET_IMU_TRACKING, payload, 10, nullptr, 0);
+}
+
+/** Encode GET_IMU_TRACKING_STATUS, match its reply, and decode the payload. */
+imu_tracking_status KinisiController::get_imu_tracking_status() {
+    uint8_t payload[1] = {0};
+    imu_tracking_status result = {};
+    uint8_t response[28] = {0};
+    if (!request(KINISI_GET_IMU_TRACKING_STATUS, payload, 0, response, 28)) return result;
+    result.state = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.fault = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 1, 1));
+    result.flags = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 2, 1));
+    result.reserved = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 3, 1));
+    result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 4, 4));
+    result.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(response + 8, 8));
+    result.elapsed_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 16, 4));
+    result.accel_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 20, 4));
+    result.gyro_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 24, 4));
+    return result;
+}
+
+/** Encode GET_IMU_TRACKING_VECTOR, match its reply, and decode the payload. */
+imu_tracking_vector KinisiController::get_imu_tracking_vector(uint8_t kind) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(kind), 1);
+    imu_tracking_vector result = {};
+    uint8_t response[28] = {0};
+    if (!request(KINISI_GET_IMU_TRACKING_VECTOR, payload, 1, response, 28)) return result;
+    result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 0, 4));
+    result.x = kinisi_codec::readDouble(response + 4);
+    result.y = kinisi_codec::readDouble(response + 12);
+    result.z = kinisi_codec::readDouble(response + 20);
+    return result;
+}
+
+/** Encode GET_IMU_TRACKING_CONFIGURATION, match its reply, and decode the payload. */
+imu_tracking_configuration KinisiController::get_imu_tracking_configuration() {
+    uint8_t payload[1] = {0};
+    imu_tracking_configuration result = {};
+    uint8_t response[12] = {0};
+    if (!request(KINISI_GET_IMU_TRACKING_CONFIGURATION, payload, 0, response, 12)) return result;
+    result.mounting_yaw_rad = kinisi_codec::readDouble(response + 0);
+    result.window_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 8, 4));
+    return result;
+}
+
+/** Encode SET_FEEDBACK_SOURCE, match its reply, and decode the payload. */
+bool KinisiController::set_feedback_source(uint8_t source) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(source), 1);
+    return request(KINISI_SET_FEEDBACK_SOURCE, payload, 1, nullptr, 0);
+}
+
+/** Encode GET_FEEDBACK_SOURCE_STATUS, match its reply, and decode the payload. */
+feedback_source_status KinisiController::get_feedback_source_status() {
+    uint8_t payload[1] = {0};
+    feedback_source_status result = {};
+    uint8_t response[27] = {0};
+    if (!request(KINISI_GET_FEEDBACK_SOURCE_STATUS, payload, 0, response, 27)) return result;
+    result.requested = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.active = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 1, 1));
+    result.valid = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 2, 1));
+    result.reason = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 3, 1));
+    result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 4, 4));
+    result.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(response + 8, 8));
+    result.origin_id = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 16, 4));
+    result.source_detail = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 20, 1));
+    result.age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 21, 4));
+    result.max_age_ms = static_cast<uint16_t>(kinisi_codec::readUnsigned(response + 25, 2));
+    return result;
+}
+
+/** Encode GET_FEEDBACK_SOURCE_VECTOR, match its reply, and decode the payload. */
+feedback_source_vector KinisiController::get_feedback_source_vector(uint8_t kind, uint32_t origin_id, uint32_t sequence) {
+    uint8_t payload[9] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(kind), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(origin_id), 4);
+    kinisi_codec::writeUnsigned(payload + 5, static_cast<uint64_t>(sequence), 4);
+    feedback_source_vector result = {};
+    uint8_t response[28] = {0};
+    if (!request(KINISI_GET_FEEDBACK_SOURCE_VECTOR, payload, 9, response, 28)) return result;
+    result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 0, 4));
+    result.x = kinisi_codec::readDouble(response + 4);
+    result.y = kinisi_codec::readDouble(response + 12);
+    result.z = kinisi_codec::readDouble(response + 20);
+    return result;
+}
+
+/** Encode SET_FEEDBACK_FUSION_MOUNT, match its reply, and decode the payload. */
+bool KinisiController::set_feedback_fusion_mount(double mounting_yaw_rad) {
+    uint8_t payload[8] = {0};
+    kinisi_codec::writeFusionYaw(payload + 0, mounting_yaw_rad);
+    return request(KINISI_SET_FEEDBACK_FUSION_MOUNT, payload, 8, nullptr, 0);
+}
+
+/** Encode GET_FEEDBACK_FUSION_MOUNT, match its reply, and decode the payload. */
+feedback_fusion_mount KinisiController::get_feedback_fusion_mount() {
+    uint8_t payload[1] = {0};
+    feedback_fusion_mount result = {};
+    uint8_t response[9] = {0};
+    if (!request(KINISI_GET_FEEDBACK_FUSION_MOUNT, payload, 0, response, 9)) return result;
+    result.confirmed = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.mounting_yaw_rad = kinisi_codec::readDouble(response + 1);
+    return result;
+}
+
+/** Encode GET_FEEDBACK_SOURCE_HEALTH, match its reply, and decode the payload. */
+feedback_source_health KinisiController::get_feedback_source_health(uint8_t source) {
+    uint8_t payload[1] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(source), 1);
+    feedback_source_health result = {};
+    uint8_t response[28] = {0};
+    result.source = source;
+    result.health = static_cast<uint8_t>(KinisiFeedbackSourceHealthState::UNAVAILABLE);
+    result.reason = static_cast<uint8_t>(KinisiFeedbackSourceReason::UNAVAILABLE);
+    result.age_us = UINT32_MAX;
+    if (!request(KINISI_GET_FEEDBACK_SOURCE_HEALTH, payload, 1, response, 28)) return result;
+    result.source = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 0, 1));
+    result.health = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 1, 1));
+    result.reason = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 2, 1));
+    result.detail = static_cast<uint8_t>(kinisi_codec::readUnsigned(response + 3, 1));
+    result.flags = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 4, 4));
+    result.sequence = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 8, 4));
+    result.timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(response + 12, 8));
+    result.age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 20, 4));
+    result.max_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 24, 4));
+    return result;
+}
+
+/** Encode GET_FEEDBACK_IMU_CHANNELS, match its reply, and decode the payload. */
+feedback_imu_channels KinisiController::get_feedback_imu_channels() {
+    uint8_t payload[1] = {0};
+    feedback_imu_channels result = {};
+    uint8_t response[24] = {0};
+    result.accel_age_us = UINT32_MAX;
+    result.gyro_age_us = UINT32_MAX;
+    if (!request(KINISI_GET_FEEDBACK_IMU_CHANNELS, payload, 0, response, 24)) return result;
+    result.accel_timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(response + 0, 8));
+    result.gyro_timestamp_us = static_cast<uint64_t>(kinisi_codec::readUnsigned(response + 8, 8));
+    result.accel_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 16, 4));
+    result.gyro_age_us = static_cast<uint32_t>(kinisi_codec::readUnsigned(response + 20, 4));
+    return result;
+}
+
+/** Encode SET_IMU_MOUNT, match its reply, and decode the payload. */
+bool KinisiController::set_imu_mount(int16_t roll_cdeg, int16_t pitch_cdeg, int16_t yaw_cdeg, int32_t x_um, int32_t y_um, int32_t z_um) {
+    uint8_t payload[18] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(roll_cdeg), 2);
+    kinisi_codec::writeUnsigned(payload + 2, static_cast<uint64_t>(pitch_cdeg), 2);
+    kinisi_codec::writeUnsigned(payload + 4, static_cast<uint64_t>(yaw_cdeg), 2);
+    kinisi_codec::writeUnsigned(payload + 6, static_cast<uint64_t>(x_um), 4);
+    kinisi_codec::writeUnsigned(payload + 10, static_cast<uint64_t>(y_um), 4);
+    kinisi_codec::writeUnsigned(payload + 14, static_cast<uint64_t>(z_um), 4);
+    return request(KINISI_SET_IMU_MOUNT, payload, 18, nullptr, 0);
+}
+
+/** Encode GET_IMU_MOUNT, match its reply, and decode the payload. */
+imu_mount_configuration KinisiController::get_imu_mount() {
+    uint8_t payload[1] = {0};
+    imu_mount_configuration result = {};
+    uint8_t response[19] = {0};
+    if (!request(KINISI_GET_IMU_MOUNT, payload, 0, response, 19)) return result;
+    result.roll_cdeg = static_cast<int16_t>(kinisi_codec::readUnsigned(response + 0, 2));
+    result.pitch_cdeg = static_cast<int16_t>(kinisi_codec::readUnsigned(response + 2, 2));
+    result.yaw_cdeg = static_cast<int16_t>(kinisi_codec::readUnsigned(response + 4, 2));
+    result.x_um = static_cast<int32_t>(kinisi_codec::readUnsigned(response + 6, 4));
+    result.y_um = static_cast<int32_t>(kinisi_codec::readUnsigned(response + 10, 4));
+    result.z_um = static_cast<int32_t>(kinisi_codec::readUnsigned(response + 14, 4));
+    result.configured = static_cast<bool>(kinisi_codec::readUnsigned(response + 18, 1));
+    return result;
+}
+
+/** Encode SET_BOARD_MOUNT, match its reply, and decode the payload. */
+bool KinisiController::set_board_mount(int16_t roll_cdeg, int16_t pitch_cdeg, int16_t yaw_cdeg, int32_t x_um, int32_t y_um, int32_t z_um) {
+    uint8_t payload[18] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(roll_cdeg), 2);
+    kinisi_codec::writeUnsigned(payload + 2, static_cast<uint64_t>(pitch_cdeg), 2);
+    kinisi_codec::writeUnsigned(payload + 4, static_cast<uint64_t>(yaw_cdeg), 2);
+    kinisi_codec::writeUnsigned(payload + 6, static_cast<uint64_t>(x_um), 4);
+    kinisi_codec::writeUnsigned(payload + 10, static_cast<uint64_t>(y_um), 4);
+    kinisi_codec::writeUnsigned(payload + 14, static_cast<uint64_t>(z_um), 4);
+    return request(KINISI_SET_BOARD_MOUNT, payload, 18, nullptr, 0);
+}
+
+/** Encode GET_BOARD_MOUNT, match its reply, and decode the payload. */
+board_mount_configuration KinisiController::get_board_mount() {
+    uint8_t payload[1] = {0};
+    board_mount_configuration result = {};
+    uint8_t response[19] = {0};
+    if (!request(KINISI_GET_BOARD_MOUNT, payload, 0, response, 19)) return result;
+    result.roll_cdeg = static_cast<int16_t>(kinisi_codec::readUnsigned(response + 0, 2));
+    result.pitch_cdeg = static_cast<int16_t>(kinisi_codec::readUnsigned(response + 2, 2));
+    result.yaw_cdeg = static_cast<int16_t>(kinisi_codec::readUnsigned(response + 4, 2));
+    result.x_um = static_cast<int32_t>(kinisi_codec::readUnsigned(response + 6, 4));
+    result.y_um = static_cast<int32_t>(kinisi_codec::readUnsigned(response + 10, 4));
+    result.z_um = static_cast<int32_t>(kinisi_codec::readUnsigned(response + 14, 4));
+    result.configured = static_cast<bool>(kinisi_codec::readUnsigned(response + 18, 1));
+    return result;
+}
+
+/** Encode INITIALIZE_MECANUM_PLATFORM_ORIENTED, match its reply, and decode the payload. */
+bool KinisiController::initialize_mecanum_platform_oriented(bool is_reversed_0, bool is_reversed_1, bool is_reversed_2, bool is_reversed_3, bool is_encoder_reversed_0, bool is_encoder_reversed_1, bool is_encoder_reversed_2, bool is_encoder_reversed_3, double length, double width, double wheels_diameter, double encoder_resolution, KinisiMecanumRollerOrientation roller_orientation) {
+    if (roller_orientation != KinisiMecanumRollerOrientation::STANDARD && roller_orientation != KinisiMecanumRollerOrientation::MIRRORED)
+        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_INITIALIZE_MECANUM_PLATFORM_ORIENTED, 0);
+    uint8_t payload[41] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(is_reversed_0), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(is_reversed_1), 1);
+    kinisi_codec::writeUnsigned(payload + 2, static_cast<uint64_t>(is_reversed_2), 1);
+    kinisi_codec::writeUnsigned(payload + 3, static_cast<uint64_t>(is_reversed_3), 1);
+    kinisi_codec::writeUnsigned(payload + 4, static_cast<uint64_t>(is_encoder_reversed_0), 1);
+    kinisi_codec::writeUnsigned(payload + 5, static_cast<uint64_t>(is_encoder_reversed_1), 1);
+    kinisi_codec::writeUnsigned(payload + 6, static_cast<uint64_t>(is_encoder_reversed_2), 1);
+    kinisi_codec::writeUnsigned(payload + 7, static_cast<uint64_t>(is_encoder_reversed_3), 1);
+    kinisi_codec::writeDouble(payload + 8, length);
+    kinisi_codec::writeDouble(payload + 16, width);
+    kinisi_codec::writeDouble(payload + 24, wheels_diameter);
+    kinisi_codec::writeDouble(payload + 32, encoder_resolution);
+    kinisi_codec::writeUnsigned(payload + 40, static_cast<uint64_t>(roller_orientation), 1);
+    return request(KINISI_INITIALIZE_MECANUM_PLATFORM_ORIENTED, payload, 41, nullptr, 0);
+}
+
+/** Encode INITIALIZE_OMNI_PLATFORM_ORIENTED, match its reply, and decode the payload. */
+bool KinisiController::initialize_omni_platform_oriented(bool is_reversed_0, bool is_reversed_1, bool is_reversed_2, bool is_encoder_reversed_0, bool is_encoder_reversed_1, bool is_encoder_reversed_2, double wheels_diameter, double robot_radius, double encoder_resolution, KinisiOmniWheelOrientation wheel_orientation) {
+    if (wheel_orientation != KinisiOmniWheelOrientation::REAR && wheel_orientation != KinisiOmniWheelOrientation::FRONT)
+        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_INITIALIZE_OMNI_PLATFORM_ORIENTED, 0);
+    uint8_t payload[31] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(is_reversed_0), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(is_reversed_1), 1);
+    kinisi_codec::writeUnsigned(payload + 2, static_cast<uint64_t>(is_reversed_2), 1);
+    kinisi_codec::writeUnsigned(payload + 3, static_cast<uint64_t>(is_encoder_reversed_0), 1);
+    kinisi_codec::writeUnsigned(payload + 4, static_cast<uint64_t>(is_encoder_reversed_1), 1);
+    kinisi_codec::writeUnsigned(payload + 5, static_cast<uint64_t>(is_encoder_reversed_2), 1);
+    kinisi_codec::writeDouble(payload + 6, wheels_diameter);
+    kinisi_codec::writeDouble(payload + 14, robot_radius);
+    kinisi_codec::writeDouble(payload + 22, encoder_resolution);
+    kinisi_codec::writeUnsigned(payload + 30, static_cast<uint64_t>(wheel_orientation), 1);
+    return request(KINISI_INITIALIZE_OMNI_PLATFORM_ORIENTED, payload, 31, nullptr, 0);
+}
+
+KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_status& status,
+        feedback_source_vector& pose, feedback_source_vector& twist) {
+    status = {}; pose = {}; twist = {};
+    for (uint8_t attempt = 0; attempt < 3; ++attempt) {
+        const auto first = get_feedback_source_status();
+        if (lastError().failure != KinisiFailure::NONE) return KinisiFeedbackRead::ERROR;
+        if (!first.valid) { status = first; return KinisiFeedbackRead::UNAVAILABLE; }
+        const auto position = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::POSE, first.origin_id, first.sequence);
+        bool have_vectors = lastError().failure == KinisiFailure::NONE;
+        if (!have_vectors && lastError().code != KinisiErrorCode::SAMPLE_NOT_AVAILABLE) return KinisiFeedbackRead::ERROR;
+        feedback_source_vector velocity{};
+        if (have_vectors) {
+            velocity = get_feedback_source_vector(KinisiFeedbackSourceVectorKind::TWIST, first.origin_id, first.sequence);
+            have_vectors = lastError().failure == KinisiFailure::NONE;
+            if (!have_vectors && lastError().code != KinisiErrorCode::SAMPLE_NOT_AVAILABLE) return KinisiFeedbackRead::ERROR;
+        }
+        const auto last = get_feedback_source_status();
+        if (lastError().failure != KinisiFailure::NONE) return KinisiFeedbackRead::ERROR;
+        if (!last.valid) { status = last; return KinisiFeedbackRead::UNAVAILABLE; }
+        if (!have_vectors || position.sequence != first.sequence || velocity.sequence != first.sequence ||
+            first.requested != last.requested || first.active != last.active || first.origin_id != last.origin_id) continue;
+        const uint32_t advance = last.sequence - first.sequence;
+        if (advance >= UINT32_C(0x80000000) || last.timestamp_us < first.timestamp_us) continue;
+        const uint64_t tick = last.timestamp_us - first.timestamp_us;
+        if (tick > UINT32_MAX || (advance == 0) != (tick == 0)) continue;
+        const uint64_t age = tick + last.age_us;
+        const uint16_t limit_ms = first.max_age_ms < last.max_age_ms ? first.max_age_ms : last.max_age_ms;
+        if (age >= first.age_us && age - first.age_us <= 50000 && age <= uint32_t(limit_ms) * 1000UL) {
+            status = first; status.age_us = static_cast<uint32_t>(age);
+            pose = position; twist = velocity;
+            return KinisiFeedbackRead::VALID;
+        }
+    }
+    return KinisiFeedbackRead::CHANGED;
+}
+
+bool KinisiController::setBoardMountGeometry(double roll_deg, double pitch_deg, double yaw_deg,
+        double x_m, double y_m, double z_m) {
+    if (!(fabs(roll_deg) <= 180 && fabs(pitch_deg) <= 90 && fabs(yaw_deg) <= 180 &&
+          fabs(x_m) <= 10 && fabs(y_m) <= 10 && fabs(z_m) <= 10))
+        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_SET_BOARD_MOUNT, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    return set_board_mount(lround(roll_deg * 100), lround(pitch_deg * 100), lround(yaw_deg * 100),
+                         lround(x_m * 1000000), lround(y_m * 1000000), lround(z_m * 1000000));
+}
+
+bool KinisiController::getBoardMountGeometry(KinisiBoardMountGeometry& mount) {
+    const board_mount_configuration raw = get_board_mount();
+    mount = {};
+    if (lastError().failure != KinisiFailure::NONE) return false;
+    mount = {raw.roll_cdeg / 100.0, raw.pitch_cdeg / 100.0, raw.yaw_cdeg / 100.0,
+             raw.x_um / 1000000.0, raw.y_um / 1000000.0, raw.z_um / 1000000.0, raw.configured};
+    return true;
+}
+
+bool KinisiController::setImuMountGeometry(double roll_deg, double pitch_deg, double yaw_deg,
+        double x_m, double y_m, double z_m) {
+    if (!(fabs(roll_deg) <= 180 && fabs(pitch_deg) <= 90 && fabs(yaw_deg) <= 180 &&
+          fabs(x_m) <= 10 && fabs(y_m) <= 10 && fabs(z_m) <= 10))
+        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_SET_IMU_MOUNT, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    return set_imu_mount(lround(roll_deg * 100), lround(pitch_deg * 100), lround(yaw_deg * 100),
+                         lround(x_m * 1000000), lround(y_m * 1000000), lround(z_m * 1000000));
+}
+
+bool KinisiController::getImuMountGeometry(KinisiImuMountGeometry& mount) {
+    const imu_mount_configuration raw = get_imu_mount();
+    mount = {};
+    if (lastError().failure != KinisiFailure::NONE) return false;
+    mount = {raw.roll_cdeg / 100.0, raw.pitch_cdeg / 100.0, raw.yaw_cdeg / 100.0,
+             raw.x_um / 1000000.0, raw.y_um / 1000000.0, raw.z_um / 1000000.0, raw.configured};
+    return true;
+}

@@ -26,6 +26,20 @@ struct KinisiError {
     uint16_t message_id;
 };
 
+/** Board-to-chassis angles in degrees; tracking-origin to PCB underside-center offsets in chassis metres. */
+struct KinisiBoardMountGeometry {
+    double roll_deg, pitch_deg, yaw_deg;
+    double x_m, y_m, z_m;
+    bool configured;
+};
+
+/** Board-to-chassis angles in degrees; tracking-origin to BMI088 offsets in chassis metres. */
+struct KinisiImuMountGeometry {
+    double roll_deg, pitch_deg, yaw_deg;
+    double x_m, y_m, z_m;
+    bool configured;
+};
+
 class KinisiProtocol {
 public:
     /** Create an inactive session. Request IDs persist across begin() calls. */
@@ -50,22 +64,44 @@ public:
     /** Discrete hardware options, or nullptr for unknown/unsupported motors. */
     const KinisiPwmFrequencyOptions* getPwmFrequencyOptions() const;
     bool supportsPwmFrequency() const;
+    bool supportsConfigurationSave() const;
+    /** Read the configured mecanum layout. Firmware before 2.25 always uses STANDARD. */
+    bool getMecanumRollerOrientation(KinisiMecanumRollerOrientation& orientation);
+    /** Read the configured single-wheel position. Firmware before 2.26 always uses REAR. */
+    bool getOmniWheelOrientation(KinisiOmniWheelOrientation& orientation);
+    /** Require READY and an exact profile: v0.3/Nano protocol 2.17+, v0.4 protocol 2.15+. */
+    bool supportsDriverSleep() const;
+    /** Require READY and an exact idle-capable profile: v0.3/Nano 2.18+, v0.4 2.16+. */
+    bool supportsBoardIdle() const;
+    /** Exact v0.4.0 experiment capability and READY protocol 2.19+. */
+    bool supportsFusionExperiment() const;
+    bool supportsImuTracking() const;
+    bool supportsBoardMounting() const;
+    /** Deprecated chip-reference API, available since protocol 2.23. */
+    bool supportsImuMounting() const;
+    bool supportsFeedbackSourceSelector() const;
+    bool supportsFeedbackSourceHealth() const;
+    bool supportsFeedbackImuChannels() const;
     const KinisiCurrentLimitOptions* getMotorCurrentLimitOptions(uint8_t index = 0) const;
     bool supportsMotorCurrentLimit(uint8_t index = 0) const;
     bool supportsMotorFaults(uint8_t index = 0) const;
     /** Check topic hardware, protocol and full event size against Wire capacity. */
     bool supportsTopic(KinisiTopic topic, uint8_t index = 0) const;
-    /** Copy the latest sample without I/O; select the union member using its topic. */
+    /** Copy cached data without I/O; board idle pauses events, so check sample timestamps for freshness. */
     bool getSubscriptionSample(KinisiTopic topic, uint8_t index, KinisiTelemetrySample& sample) const;
     /** Failure of the most recent operation; inspect after every value-returning getter. */
     const KinisiError& lastError() const { return error_; }
 protected:
+    /** Set structured failure; fatal transport/protocol failures invalidate the session. */
+    bool fail(KinisiFailure failure, uint8_t command, uint16_t id,
+              KinisiErrorCode code = KinisiErrorCode::NONE);
     /** Reject invalid velocity gains locally; integral contribution is 0..100 PWM points. */
     bool validateVelocityTuning(uint8_t command, double kp, double ki, double kd, double limit);
     /** Execute exactly one request; never retry an operation that might have executed. */
     bool request(uint8_t command, const uint8_t* payload, uint8_t length,
                  uint8_t* response, uint8_t response_length);
 private:
+    template<typename Orientation> bool readPlatformOrientation(uint8_t field_id, Orientation& orientation);
     uint8_t address_;
     uint16_t next_id_;
     uint32_t timeout_ms_;
@@ -88,9 +124,6 @@ private:
     void clearSubscriptions();
     /** Validate and cache one unsolicited ID-zero telemetry frame. */
     bool telemetry(const uint8_t* frame, uint8_t size);
-    /** Set structured failure; fatal transport/protocol failures invalidate the session. */
-    bool fail(KinisiFailure failure, uint8_t command, uint16_t id,
-              KinisiErrorCode code = KinisiErrorCode::NONE);
     /** Write a frame only after validating request and response buffer limits. */
     bool send(uint8_t command, uint16_t id, const uint8_t* payload,
               uint8_t length, uint8_t response_length);

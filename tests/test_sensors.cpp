@@ -1,7 +1,10 @@
 // Public board profiles and sensor commands through the actual I2C session.
 #include <assert.h>
 #include <stdio.h>
+#include <math.h>
 #include "kinisi.h"
+#include "kinisi_codec.h"
+#include "legacy_profile.h"
 
 TwoWire Wire;
 MockSerial Serial;
@@ -45,10 +48,25 @@ static void reset(uint8_t board = 4, uint8_t minor = 5, uint8_t board_patch = 0)
 }
 
 static void profiles() {
+    assert(!legacy_profile.capabilities.imu_mounting && !legacy_profile_v215.capabilities.imu_mounting);
+    assert(!legacy_profile.capabilities.fusion_experiment && !legacy_profile_v215.capabilities.fusion_experiment);
+    assert(legacy_profile.resources.motors == 4 && legacy_profile.pwm_frequency.default_hz == 100000UL);
+    assert(legacy_profile.motor_features[3].id == 3 && legacy_profile.motor_features[3].current_limit);
+    assert(legacy_profile.hasSensor(KinisiSensor::IMU) && legacy_profile.imu[0].gyroscope);
+    assert(!legacy_profile.power.driver_sleep);
+    assert(!legacy_profile.power.board_idle);
+    assert(legacy_profile_v215.motor_features[3].id == 3 && legacy_profile_v215.imu[0].gyroscope);
+    assert(legacy_profile_v215.power.driver_sleep && !legacy_profile_v215.power.board_idle);
     const uint8_t encoder_counts[] = {1, 4, 4, 4}, gpio_counts[] = {4, 4, 10, 8};
     KinisiBoardProfile profile;
     for (uint8_t i = 1; i <= 4; ++i) {
         assert(kinisiLookupBoardProfile(1, 0, i, 0, profile));
+        assert(profile.capabilities.imu_mounting == (i == 4));
+        assert(profile.imu_geometry.present == (i == 4));
+        if (profile.imu_geometry.present) {
+            const auto& vector = profile.imu_geometry.underside_center_to_imu_um;
+            assert(vector[0] == -15373 && vector[1] == 26953 && vector[2] == 2075);
+        }
         assert(profile.model == 1 && profile.major == 0 && profile.minor == i && profile.patch == 0);
         assert(profile.resources.motors == 4 && profile.resources.encoders == encoder_counts[i - 1]);
         assert(profile.resources.gpio == gpio_counts[i - 1] && profile.resources.status_leds == 1);
@@ -59,10 +77,16 @@ static void profiles() {
         }
         assert(profile.hasSensor(KinisiSensor::TEMPERATURE) == (i == 4));
         assert(profile.hasSensor(KinisiSensor::IMU) == (i == 4));
+        assert(profile.power.driver_sleep == (i >= 3));
+        assert(profile.power.board_idle == (i >= 3));
         assert(!profile.hasSensor(KinisiSensor::IMU, 1));
         assert(!profile.hasSensor(static_cast<KinisiSensor>(255)));
     }
     assert(profile.imu[0].accelerometer && profile.imu[0].gyroscope);
+    assert(kinisiLookupBoardProfile(1, 0, 3, 1, profile));
+    assert(profile.patch == 1 && profile.resources.motors == 4 && profile.resources.encoders == 4);
+    assert(profile.power.driver_sleep && profile.power.board_idle);
+    assert(!kinisiLookupBoardProfile(1, 0, 3, 2, profile));
     assert(!kinisiLookupBoardProfile(1, 0, 4, 1, profile));
     assert(profile.model == 0 && profile.resources.motors == 0);
     assert(!kinisiLookupBoardProfile(2, 0, 4, 0, profile));
@@ -352,7 +376,892 @@ static void pwm_frequencies() {
     assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == before);
 }
 
+static void configuration_save() {
+    KinisiController c;
+    for (uint8_t board = 1; board <= 5; ++board) {
+        reset(board, 14);
+        assert(c.begin(1000, 0));
+        assert(c.supportsConfigurationSave() == (board == 4));
+        const auto before = Wire.transactions;
+        assert(c.save_configuration() == (board == 4));
+        if (board != 4) {
+            assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND);
+            assert(Wire.transactions == before);
+        }
+    }
+    reset(4, 13);
+    assert(c.begin(1000, 0));
+    assert(!c.supportsConfigurationSave() && !c.save_configuration());
+    reset(4, 14);
+    assert(c.begin(1000, 0));
+    Wire.responder = [](const std::vector<uint8_t>& r) {
+        const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+        if (r[1] == KINISI_SAVE_CONFIGURATION) {
+            assert(r.size() == 4);
+            Wire.responses.push_back(frame(KINISI_ERROR, id, {r[1], uint8_t(KinisiErrorCode::INTERNAL_ERROR)}));
+        } else {
+            assert(r[1] == KINISI_GET_CONFIGURATION_FIELD && r.size() == 6 && r[4] == 4 && r[5] == 1);
+            Wire.responses.push_back(frame(r[1], id, {0, 0, 0, 0, 0, 0, 0x90, 0x40}));
+        }
+    };
+    assert(!c.save_configuration());
+    assert(c.get_configuration_field(4, 1) == 1024.0);
+}
+
+static void legacy_driver_sleep() {
+    struct Case { uint8_t minor, patch, protocol; bool supported; };
+    const Case cases[] = {{3, 0, 16, false}, {3, 1, 15, false}, {3, 1, 16, false},
+        {3, 0, 17, true}, {3, 1, 17, true}, {3, 1, 18, true}, {3, 2, 17, false},
+        {4, 1, 17, false}, {99, 0, 17, false}, {1, 0, 17, false}, {2, 0, 17, false}, {4, 0, 15, true}};
+    for (const auto& item : cases) {
+        reset(item.minor, item.protocol, item.patch);
+        KinisiController c; assert(c.begin(1000, 0));
+        assert(c.supportsDriverSleep() == item.supported);
+        const auto before = Wire.transactions;
+        if (!item.supported) {
+            assert(!c.set_driver_sleep(1)); c.get_driver_sleep();
+            assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+            continue;
+        }
+        uint8_t sleeping = 0;
+        Wire.responder = [&](const std::vector<uint8_t>& r) {
+            const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+            if (r[1] == KINISI_SET_DRIVER_SLEEP) {
+                assert(r.size() == 5 && r[4] <= 1);
+                sleeping = r[4]; Wire.responses.push_back(frame(r[1], id));
+            } else {
+                assert(r[1] == KINISI_GET_DRIVER_SLEEP && r.size() == 4);
+                Wire.responses.push_back(frame(r[1], id, {sleeping}));
+            }
+        };
+        for (uint8_t requested : {1, 1, 0, 0}) {
+            assert(c.set_driver_sleep(requested));
+            assert(c.get_driver_sleep() == requested && c.lastError().failure == KinisiFailure::NONE);
+        }
+        assert(Wire.transactions == before + 8); // No implicit initialization or motion.
+        if (item.minor == 3 && item.protocol < 18) assert(!c.supportsBoardIdle());
+        Wire.responder = [](const std::vector<uint8_t>& r) {
+            Wire.responses.push_back(frame(KINISI_ERROR, r[2] | uint16_t(r[3]) << 8,
+                {r[1], uint8_t(KinisiErrorCode::DRIVERS_ASLEEP)}));
+        };
+        assert(!c.set_driver_sleep(0));
+        assert(c.lastError().code == KinisiErrorCode::DRIVERS_ASLEEP && c.ready());
+    }
+}
+
+static void driver_sleep() {
+    reset(4, 15);
+    KinisiController c;
+    assert(!c.supportsDriverSleep());
+    assert(!c.set_driver_sleep(1));
+    assert(c.lastError().failure == KinisiFailure::NOT_READY && Wire.transactions == 0);
+    c.get_driver_sleep();
+    assert(c.lastError().failure == KinisiFailure::NOT_READY && Wire.transactions == 0);
+    for (uint8_t board = 1; board <= 5; ++board) {
+        reset(board, 15); assert(c.begin(1000, 0));
+        assert(c.supportsDriverSleep() == (board == 4));
+        if (board == 4) continue;
+        const auto before = Wire.transactions;
+        assert(!c.set_driver_sleep(1)); c.get_driver_sleep();
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+    }
+    reset(4, 14); assert(c.begin(1000, 0));
+    auto before = Wire.transactions;
+    assert(!c.supportsDriverSleep() && !c.set_driver_sleep(1)); c.get_driver_sleep();
+    assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+    reset(4, 15, 1); assert(c.begin(1000, 0));
+    before = Wire.transactions;
+    assert(!c.supportsDriverSleep() && !c.set_driver_sleep(1)); c.get_driver_sleep();
+    assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+    reset(4, 15); assert(c.begin(1000, 0));
+    uint8_t sleeping = 0;
+    bool wake_failure = false;
+    auto sleep_response = [&](const std::vector<uint8_t>& r) {
+        const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+        if (r[1] == KINISI_SET_DRIVER_SLEEP) {
+            assert(r.size() == 5 && r[4] <= 1);
+            if (!r[4] && wake_failure) {
+                Wire.responses.push_back(frame(KINISI_ERROR, id, {r[1], uint8_t(KinisiErrorCode::INTERNAL_ERROR)}));
+                return;
+            }
+            sleeping = r[4];
+            Wire.responses.push_back(frame(r[1], id));
+        } else if (r[1] == KINISI_GET_DRIVER_SLEEP) {
+            assert(r.size() == 4);
+            Wire.responses.push_back(frame(r[1], id, {sleeping}));
+        } else {
+            assert(r[1] == KINISI_SET_MOTOR_SPEED);
+            Wire.responses.push_back(frame(KINISI_ERROR, id, {r[1], uint8_t(KinisiErrorCode::DRIVERS_ASLEEP)}));
+        }
+    };
+    Wire.responder = sleep_response;
+    assert(c.set_driver_sleep(1) && c.set_driver_sleep(1));
+    assert(c.get_driver_sleep() == 1 && c.lastError().failure == KinisiFailure::NONE);
+    before = Wire.transactions;
+    assert(!c.set_driver_sleep(2) && c.lastError().failure == KinisiFailure::INVALID_ARGUMENT);
+    assert(!c.set_driver_sleep(255) && Wire.transactions == before);
+    assert(!c.set_motor_speed(0, 10));
+    assert(c.lastError().code == KinisiErrorCode::DRIVERS_ASLEEP && c.ready());
+    wake_failure = true;
+    assert(!c.set_driver_sleep(0) && c.lastError().code == KinisiErrorCode::INTERNAL_ERROR);
+    assert(c.get_driver_sleep() == 1);
+    wake_failure = false;
+    assert(c.set_driver_sleep(0) && c.get_driver_sleep() == 0);
+    sleeping = 2;
+    c.get_driver_sleep();
+    assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    sleeping = 1;
+    reset(4, 15);
+    Wire.responder = [&](const std::vector<uint8_t>& r) {
+        assert(r[1] != KINISI_SET_DRIVER_SLEEP);  // Reconnect never wakes the board.
+        if (r[1] == KINISI_GET_DRIVER_SLEEP) sleep_response(r);
+        else respond(r);
+    };
+    assert(c.begin(1000, 0) && c.supportsDriverSleep());
+    assert(c.get_driver_sleep() == 1 && c.lastError().failure == KinisiFailure::NONE);
+}
+
+static void board_idle(uint8_t idle_revision = 4, uint8_t idle_patch = 0, uint8_t idle_protocol = 16) {
+    reset(4, 16);
+    KinisiController c;
+    assert(!c.supportsBoardIdle());
+    assert(!c.set_board_idle(1));
+    assert(c.lastError().failure == KinisiFailure::NOT_READY && Wire.transactions == 0);
+    c.get_board_idle();
+    assert(c.lastError().failure == KinisiFailure::NOT_READY && Wire.transactions == 0);
+    for (uint8_t board = 1; board <= 5; ++board) {
+        reset(board, 16); assert(c.begin(1000, 0));
+        assert(c.supportsBoardIdle() == (board == 4));
+        if (board == 4) continue;
+        const auto before = Wire.transactions;
+        assert(!c.set_board_idle(1)); c.get_board_idle();
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+    }
+    reset(4, 15); assert(c.begin(1000, 0));
+    auto before = Wire.transactions;
+    assert(!c.supportsBoardIdle() && !c.set_board_idle(1)); c.get_board_idle();
+    assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+    reset(4, 16, 1); assert(c.begin(1000, 0));
+    before = Wire.transactions;
+    assert(!c.supportsBoardIdle() && !c.set_board_idle(1)); c.get_board_idle();
+    assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+    struct IdleGate { uint8_t minor, patch, protocol; };
+    for (const IdleGate& gate : {IdleGate{3, 0, 17}, IdleGate{3, 1, 17},
+            IdleGate{3, 2, 18}, IdleGate{4, 1, 18}, IdleGate{1, 0, 18}, IdleGate{2, 0, 18}}) {
+        reset(gate.minor, gate.protocol, gate.patch); assert(c.begin(1000, 0));
+        before = Wire.transactions;
+        assert(!c.supportsBoardIdle() && !c.set_board_idle(1)); c.get_board_idle();
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+        if (gate.minor == 3 && gate.patch <= 1) assert(c.supportsDriverSleep());
+    }
+    reset(idle_revision, idle_protocol, idle_patch); assert(c.begin(1000, 0));
+    assert(c.supportsBoardIdle());
+    uint8_t sleeping = 0;
+    bool wake_failure = false;
+    auto sleep_response = [&](const std::vector<uint8_t>& r) {
+        const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+        if (r[1] == KINISI_SET_BOARD_IDLE) {
+            assert(r.size() == 5 && r[4] <= 1);
+            if (!r[4] && wake_failure) {
+                Wire.responses.push_back(frame(KINISI_ERROR, id, {r[1], uint8_t(KinisiErrorCode::INTERNAL_ERROR)}));
+                return;
+            }
+            sleeping = r[4];
+            Wire.responses.push_back(frame(r[1], id));
+        } else if (r[1] == KINISI_GET_BOARD_IDLE) {
+            assert(r.size() == 4);
+            Wire.responses.push_back(frame(r[1], id, {sleeping}));
+        } else {
+            assert(r[1] == KINISI_SET_DRIVER_SLEEP);
+            Wire.responses.push_back(frame(KINISI_ERROR, id, {r[1], uint8_t(KinisiErrorCode::BOARD_IDLE)}));
+        }
+    };
+    Wire.responder = sleep_response;
+    assert(c.set_board_idle(1) && c.set_board_idle(1));
+    assert(c.get_board_idle() == 1 && c.lastError().failure == KinisiFailure::NONE);
+    before = Wire.transactions;
+    assert(!c.set_board_idle(2) && c.lastError().failure == KinisiFailure::INVALID_ARGUMENT);
+    assert(!c.set_board_idle(255) && Wire.transactions == before);
+    assert(!c.set_driver_sleep(0));
+    assert(c.lastError().code == KinisiErrorCode::BOARD_IDLE && c.ready());
+    wake_failure = true;
+    assert(!c.set_board_idle(0) && c.lastError().code == KinisiErrorCode::INTERNAL_ERROR);
+    assert(c.get_board_idle() == 1);
+    wake_failure = false;
+    assert(c.set_board_idle(0) && c.get_board_idle() == 0);
+    sleeping = 2;
+    c.get_board_idle();
+    assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    sleeping = 1;
+    reset(idle_revision, idle_protocol, idle_patch);
+    Wire.responder = [&](const std::vector<uint8_t>& r) {
+        assert(r[1] != KINISI_SET_BOARD_IDLE);  // Reconnect never wakes the board.
+        if (r[1] == KINISI_GET_BOARD_IDLE) sleep_response(r);
+        else respond(r);
+    };
+    assert(c.begin(1000, 0) && c.supportsBoardIdle());
+    assert(c.get_board_idle() == 1 && c.lastError().failure == KinisiFailure::NONE);
+}
+
+static void fusion_experiment() {
+    const double pi = 3.14159265358979323846;
+    uint8_t encoded[8];
+    for (int sign : {-1, 1}) {
+        const float endpoint = sign * static_cast<float>(pi);
+        kinisi_codec::writeFusionYaw(encoded, endpoint);
+        assert(kinisi_codec::readUnsigned(encoded, 8) == (UINT64_C(0x400921fb54442d18) |
+            (sign < 0 ? UINT64_C(0x8000000000000000) : 0)));
+        const float outside = nextafterf(endpoint, sign * INFINITY);
+        kinisi_codec::writeFusionYaw(encoded, outside);
+        assert(fabs(kinisi_codec::readDouble(encoded)) > pi);
+        // Host binary64 must not normalize widened float endpoints or adjacent doubles.
+        kinisi_codec::writeFusionYaw(encoded, static_cast<double>(endpoint));
+        assert(fabs(kinisi_codec::readDouble(encoded)) > pi);
+        kinisi_codec::writeFusionYaw(encoded, sign * pi);
+        assert(kinisi_codec::readDouble(encoded) == sign * pi);
+    }
+    struct Gate { uint8_t minor, patch, version; bool supported; };
+    for (const Gate& gate : {Gate{4,0,19,true}, Gate{4,0,20,true}, Gate{4,0,18,false},
+            Gate{4,1,19,false}, Gate{3,0,19,false}, Gate{3,1,19,false}, Gate{99,0,19,false}}) {
+        reset(gate.minor, gate.version, gate.patch);
+        KinisiController c;
+        assert(!c.supportsFusionExperiment());
+        assert(c.begin(1000, 0) && c.supportsFusionExperiment() == gate.supported);
+        auto before = Wire.transactions;
+        if (!gate.supported) {
+            assert(!c.set_fusion_experiment(2, 0));
+            c.get_fusion_status(); c.get_fusion_vector(0); c.get_fusion_configuration();
+            assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+            continue;
+        }
+        bool reject = false, malformed = false;
+        double expectedYaw = -.5;
+        Wire.responder = [&](const std::vector<uint8_t>& r) {
+            const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+            assert(r[1] >= KINISI_SET_FUSION_EXPERIMENT && r[1] <= KINISI_GET_FUSION_CONFIGURATION);
+            if (reject) { Wire.responses.push_back(frame(KINISI_ERROR, id, {r[1], uint8_t(KinisiErrorCode::INVALID_ARGUMENT)})); return; }
+            std::vector<uint8_t> data;
+            if (r[1] == KINISI_SET_FUSION_EXPERIMENT) {
+                assert(r.size() == 13 && r[4] == 2 && kinisi_codec::readDouble(r.data()+5) == expectedYaw);
+            } else if (r[1] == KINISI_GET_FUSION_STATUS) {
+                data.resize(28); data[0]=malformed ? 3 : 2; data[1]=2; data[3]=3;
+                kinisi_codec::writeUnsigned(data.data()+4, 42, 4);
+                kinisi_codec::writeUnsigned(data.data()+8, (UINT64_C(1)<<60)+7, 8);
+                kinisi_codec::writeUnsigned(data.data()+24, 30, 4);
+            } else if (r[1] == KINISI_GET_FUSION_VECTOR) {
+                assert(r.size() == 5 && r[4] == 2); data.resize(28);
+                kinisi_codec::writeUnsigned(data.data(),42,4);
+                kinisi_codec::writeDouble(data.data()+4,1.25);
+                kinisi_codec::writeDouble(data.data()+12,-2);
+                kinisi_codec::writeDouble(data.data()+20,.5);
+            } else {
+                data.resize(9);data[0]=2;kinisi_codec::writeDouble(data.data()+1,-.5);
+            }
+            assert(data.size()+4 <= 32); Wire.responses.push_back(frame(r[1],id,data));
+        };
+        assert(c.set_fusion_experiment(KinisiFusionMode::FUSED,-.5));
+        for (int sign : {-1, 1}) {
+            expectedYaw = sign * pi;
+            assert(c.set_fusion_experiment(2, expectedYaw));
+            const auto count = Wire.transactions;
+            assert(!c.set_fusion_experiment(2, nextafter(expectedYaw, sign * INFINITY)));
+            assert(!c.set_fusion_experiment(2, nextafterf(static_cast<float>(expectedYaw), sign * INFINITY)));
+            assert(!c.set_fusion_experiment(2, static_cast<float>(expectedYaw)));
+            assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == count);
+        }
+        auto status = c.get_fusion_status();
+        assert(c.lastError().failure == KinisiFailure::NONE && status.sequence == 42);
+        assert(status.timestamp_us == (UINT64_C(1)<<60)+7 && status.encoder_age_us == 30);
+        auto vector = c.get_fusion_vector(KinisiFusionVectorKind::FUSED_POSE);
+        assert(vector.sequence == 42 && vector.x == 1.25 && vector.y == -2 && vector.z == .5);
+        assert(c.get_fusion_configuration().mounting_yaw_rad == -.5);
+        before = Wire.transactions;
+        assert(!c.set_fusion_experiment(3,0)); assert(!c.set_fusion_experiment(2,4));
+        c.get_fusion_vector(5);
+        assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == before);
+        reject = true; before = Wire.transactions;
+        assert(!c.set_fusion_experiment(2,0));
+        assert(c.lastError().code == KinisiErrorCode::INVALID_ARGUMENT && c.ready() && Wire.transactions == before+1);
+        reject = false; malformed = true; c.get_fusion_status();
+        assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    }
+}
+
+static void imu_tracking() {
+    for (uint8_t version : {uint8_t(19), uint8_t(20), uint8_t(21)}) {
+        reset(4, version); KinisiController c;
+        assert(!c.supportsImuTracking()); assert(c.begin(1000, 0));
+        assert(c.supportsImuTracking() == (version >= 20));
+        auto before = Wire.transactions;
+        if (version < 20) {
+            assert(!c.set_imu_tracking(0,1,0)); c.get_imu_tracking_status(); c.get_imu_tracking_vector(0); c.get_imu_tracking_configuration();
+            assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before); continue;
+        }
+        bool reject = false, malformed = false;
+        Wire.responder = [&](const std::vector<uint8_t>& r) {
+            uint16_t id=r[2] | uint16_t(r[3])<<8; std::vector<uint8_t> data;
+            if (reject) { Wire.responses.push_back(frame(KINISI_ERROR,id,{r[1],uint8_t(KinisiErrorCode::INVALID_ARGUMENT)})); return; }
+            if (r[1]==KINISI_SET_IMU_TRACKING) {
+                assert(r.size()==14 && r[4]<=3);
+                assert(r[4]==1 ? r[5]==0 && kinisi_codec::readDouble(r.data()+6)==0 : r[5]==1 && kinisi_codec::readDouble(r.data()+6)==3.141592653589793);
+            } else if (r[1]==KINISI_GET_IMU_TRACKING_STATUS) {
+                data.resize(28); data[0]=malformed?5:2; data[2]=3;
+                kinisi_codec::writeUnsigned(data.data()+4,42,4); kinisi_codec::writeUnsigned(data.data()+8,(UINT64_C(1)<<60)+7,8);
+                kinisi_codec::writeUnsigned(data.data()+16,500,4); kinisi_codec::writeUnsigned(data.data()+20,10,4); kinisi_codec::writeUnsigned(data.data()+24,20,4);
+            } else if (r[1]==KINISI_GET_IMU_TRACKING_VECTOR) {
+                data.resize(28); kinisi_codec::writeUnsigned(data.data(),42,4); kinisi_codec::writeDouble(data.data()+4,1.25);
+            } else if (r[1]==KINISI_GET_IMU_TRACKING_CONFIGURATION) {
+                data.resize(12); kinisi_codec::writeDouble(data.data(),3.141592653589793); kinisi_codec::writeUnsigned(data.data()+8,5000000,4);
+            } else assert(false);
+            assert(data.size()+4<=32); Wire.responses.push_back(frame(r[1],id,data));
+        };
+        for (auto action : {KinisiImuTrackingAction::START,KinisiImuTrackingAction::RESET,KinisiImuTrackingAction::RECALIBRATE})
+            assert(c.set_imu_tracking(action,1,3.141592653589793));
+        assert(c.set_imu_tracking(KinisiImuTrackingAction::STOP,0,0));
+        auto status=c.get_imu_tracking_status(); assert(status.timestamp_us==(UINT64_C(1)<<60)+7 && status.elapsed_us==500 && status.accel_age_us==10 && status.gyro_age_us==20);
+        assert(c.get_imu_tracking_vector(KinisiImuTrackingVectorKind::POSE).x==1.25);
+        assert(c.get_imu_tracking_configuration().window_us==5000000);
+        before=Wire.transactions;
+        assert(!c.set_imu_tracking(0,0,0)); assert(!c.set_imu_tracking(1,1,0)); assert(!c.set_imu_tracking(1,0,1)); assert(!c.set_imu_tracking(4,1,0));
+        assert(!c.set_imu_tracking(0,1,INFINITY)); assert(!c.set_imu_tracking(0,1,NAN)); assert(!c.set_imu_tracking(0,1,4));
+        c.get_imu_tracking_vector(3); assert(c.lastError().failure==KinisiFailure::INVALID_ARGUMENT && Wire.transactions==before);
+        reject=true; assert(!c.set_imu_tracking(0,1,0)); assert(c.ready() && c.lastError().code==KinisiErrorCode::INVALID_ARGUMENT && Wire.transactions==before+1);
+        reject=false; malformed=true; c.get_imu_tracking_status(); assert(c.lastError().failure==KinisiFailure::MALFORMED_RESPONSE);
+    }
+    for (uint8_t minor : {uint8_t(1),uint8_t(2),uint8_t(3),uint8_t(99)}) {
+        reset(minor,20); KinisiController c; assert(c.begin(1000,0)); assert(!c.supportsImuTracking());
+        auto before=Wire.transactions; c.get_imu_tracking_status(); assert(Wire.transactions==before);
+    }
+    assert(legacy_capabilities_v219.fusion_experiment && !legacy_capabilities_v219.imu_tracking);
+    for (uint64_t sign : {UINT64_C(0), UINT64_C(0x8000000000000000)}) {
+        reset(4,20); KinisiController client; assert(client.begin(1000,0));
+        uint64_t bits = sign | UINT64_C(0x400921fb54442d18);
+        Wire.responder = [&](const std::vector<uint8_t>& request) {
+            std::vector<uint8_t> config(12);
+            kinisi_codec::writeUnsigned(config.data(),bits,8);
+            kinisi_codec::writeUnsigned(config.data()+8,5000000,4);
+            Wire.responses.push_back(frame(request[1],request[2] | uint16_t(request[3])<<8,config));
+        };
+        assert(client.get_imu_tracking_configuration().window_us==5000000);
+        ++bits;
+        client.get_imu_tracking_configuration();
+        assert(client.lastError().failure==KinisiFailure::MALFORMED_RESPONSE && !client.ready());
+    }
+}
+
+static void feedback_source_selector() {
+    reset(4, 21);
+    KinisiController c;
+    assert(!c.supportsFeedbackSourceSelector());
+    assert(c.begin(1000, 0) && c.supportsFeedbackSourceSelector());
+    uint8_t source = 0;
+    uint32_t origin = 3, sequence = 42, captured_age = 937, confirmed_age = 937;
+    uint64_t stamp = (UINT64_C(1)<<60)+7;
+    uint32_t next_sequence = 42;
+    int32_t tick = 0;
+    uint16_t limit_override = 0;
+    unsigned reads = 0;
+    bool changing = false, expired = false, unsafe = false, malformed = false;
+    auto count = Wire.transactions;
+    Wire.responder = [&](const std::vector<uint8_t>& request) {
+        const uint8_t cmd = request[1];
+        const uint16_t id = request[2] | uint16_t(request[3]) << 8;
+        std::vector<uint8_t> data;
+        if (cmd == KINISI_GET_FEEDBACK_SOURCE_STATUS) {
+            data.resize(27);
+            const bool confirming = ++reads % 2 == 0;
+            data[0] = source; data[1] = expired ? 255 : source; data[2] = expired ? 0 : 1;
+            data[3] = malformed ? 11 : expired ? 5 : 0;
+            kinisi_codec::writeUnsigned(data.data()+4, expired ? 0 : confirming ? next_sequence : sequence, 4);
+            kinisi_codec::writeUnsigned(data.data()+8, expired ? 0 : confirming ? stamp + tick : stamp, 8);
+            kinisi_codec::writeUnsigned(data.data()+16, changing ? ++origin : origin, 4);
+            kinisi_codec::writeUnsigned(data.data()+21, expired ? UINT32_MAX : confirming ? confirmed_age : captured_age, 4);
+            const uint16_t max_age = source == 0 ? 300 : source == 1 ? 50 : 60;
+            kinisi_codec::writeUnsigned(data.data()+25, confirming && limit_override ? limit_override : max_age, 2);
+        } else if (cmd == KINISI_GET_FEEDBACK_SOURCE_VECTOR) {
+            assert(request.size() == 13 && request[4] < 2);
+            assert(kinisi_codec::readUnsigned(request.data()+5, 4) == origin && kinisi_codec::readUnsigned(request.data()+9, 4) == sequence);
+            data.resize(28); kinisi_codec::writeUnsigned(data.data(), sequence, 4);
+            kinisi_codec::writeDouble(data.data()+4, request[4] == 0 ? 1.25 : -0.5);
+        } else if (cmd == KINISI_SET_FEEDBACK_SOURCE && unsafe) {
+            Wire.responses.push_back(frame(KINISI_ERROR, id, {cmd, uint8_t(KinisiErrorCode::SOURCE_SWITCH_UNSAFE)}));
+            return;
+        } else if (cmd == KINISI_SET_FEEDBACK_FUSION_MOUNT) {
+            assert(request.size() == 12 && kinisi_codec::readDouble(request.data()+4) == -3.141592653589793);
+        } else if (cmd == KINISI_GET_FEEDBACK_FUSION_MOUNT) {
+            data.resize(9); data[0] = 1; kinisi_codec::writeDouble(data.data()+1, -3.141592653589793);
+        } else assert(false);
+        assert(data.size()+4 <= 32);
+        Wire.responses.push_back(frame(cmd, id, data));
+    };
+    feedback_source_status status{};
+    feedback_source_vector pose{}, twist{};
+    for (source = 0; source < 3; ++source) {
+        assert(c.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::VALID);
+        assert(status.requested == source && status.active == source && status.valid && status.origin_id == origin &&
+            status.sequence == 42 && status.timestamp_us == (UINT64_C(1)<<60)+7 && status.age_us == 937);
+        assert(pose.x == 1.25 && twist.x == -0.5);
+    }
+    source = 2; changing = true;
+    assert(c.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::CHANGED);
+    assert(pose.x == 0 && twist.x == 0 && !status.valid);
+    assert(Wire.transactions == count + 24);
+    changing = false;
+    sequence = UINT32_MAX; next_sequence = 0; tick = 10000;
+    for (source = 0; source < 3; ++source) {
+        captured_age = confirmed_age = source == 0 ? 150000 : 1000;
+        assert(c.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::VALID);
+        assert(status.sequence == sequence && status.timestamp_us == stamp && status.age_us == captured_age + 10000);
+    }
+    sequence = 42;
+    struct BoundsCase { uint8_t source; uint32_t first_age; int32_t delta; uint32_t last_age, seq; uint16_t max_age; };
+    const BoundsCase rejected[] = {{1,40000,12000,40000,43,50}, {0,150000,60000,150000,43,300},
+        {0,50000,12000,49500,43,60}, {2,1000,-1,1000,43,60}, {2,1000,1000,1000,41,60}};
+    for (const auto& trial : rejected) {
+        source = trial.source; captured_age = trial.first_age; tick = trial.delta;
+        confirmed_age = trial.last_age; next_sequence = trial.seq; limit_override = trial.max_age;
+        assert(c.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::CHANGED);
+    }
+    source = 2; expired = true;
+    assert(c.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::UNAVAILABLE);
+    assert(!status.valid && status.active == 255 && status.reason == 5 && status.age_us == UINT32_MAX);
+    unsafe = true; count = Wire.transactions;
+    assert(!c.set_feedback_source(KinisiFeedbackSource::IMU_ONLY) && c.lastError().code == KinisiErrorCode::SOURCE_SWITCH_UNSAFE);
+    assert(Wire.transactions == count + 1 && c.ready());
+    assert(!c.set_feedback_source(KinisiFeedbackSource::NONE));
+    c.get_feedback_source_vector(2, 3, 42);
+    assert(!c.set_feedback_fusion_mount(NAN) && !c.set_feedback_fusion_mount(INFINITY));
+    assert(Wire.transactions == count + 1 && c.lastError().failure == KinisiFailure::INVALID_ARGUMENT);
+    assert(c.set_feedback_fusion_mount(-3.141592653589793));
+    assert(c.get_feedback_fusion_mount().confirmed == 1);
+    malformed = true;
+    c.get_feedback_source_status();
+    assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    for (uint8_t minor : {uint8_t(3),uint8_t(4)}) {
+        reset(minor, minor == 4 ? 20 : 21);
+        assert(c.begin(1000, 0) && !c.supportsFeedbackSourceSelector());
+        count = Wire.transactions;
+        assert(!c.set_feedback_source(0)); c.get_feedback_source_status(); c.get_feedback_source_vector(0, 3, 42);
+        assert(!c.set_feedback_fusion_mount(0)); c.get_feedback_fusion_mount();
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == count);
+    }
+}
+
+static void feedback_health() {
+    reset(4, 22);
+    KinisiController c;
+    assert(!c.supportsFeedbackSourceHealth() && !c.supportsFeedbackImuChannels());
+    assert(c.begin(1000, 0));
+    assert(c.supportsFeedbackSourceHealth() == (KINISI_WIRE_BUFFER_SIZE >= 32));
+    assert(c.supportsFeedbackImuChannels() == (KINISI_WIRE_BUFFER_SIZE >= 28));
+    const uint64_t stamp = (UINT64_C(1) << 60) + 33;
+    uint8_t expected = KINISI_GET_FEEDBACK_IMU_CHANNELS, source = 1;
+    bool device_error = false;
+    std::vector<uint8_t> data(24);
+    Wire.responder = [&](const std::vector<uint8_t>& r) {
+        assert(r[1] == expected && r.size() == (expected == KINISI_GET_FEEDBACK_IMU_CHANNELS ? 4U : 5U));
+        if (expected == KINISI_GET_FEEDBACK_SOURCE_HEALTH) assert(r[4] == source);
+        const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+        Wire.responses.push_back(device_error ? frame(KINISI_ERROR, id, {expected, uint8_t(KinisiErrorCode::SENSOR_NOT_AVAILABLE)}) :
+                                 frame(expected, id, data));
+    };
+    auto count = Wire.transactions;
+    if (c.supportsFeedbackImuChannels()) {
+        kinisi_codec::writeUnsigned(data.data(), stamp, 8);
+        kinisi_codec::writeUnsigned(data.data() + 16, 41000, 4);
+        kinisi_codec::writeUnsigned(data.data() + 20, UINT32_MAX, 4);
+        auto channels = c.get_feedback_imu_channels();
+        assert(c.lastError().failure == KinisiFailure::NONE && channels.accel_timestamp_us == stamp);
+        assert(channels.gyro_timestamp_us == 0 && channels.gyro_age_us == UINT32_MAX && channels.accel_age_us == 41000);
+        kinisi_codec::writeUnsigned(data.data() + 8, stamp + 2500, 8);
+        kinisi_codec::writeUnsigned(data.data() + 16, 2600, 4);
+        kinisi_codec::writeUnsigned(data.data() + 20, 100, 4);
+        channels = c.get_feedback_imu_channels();
+        assert(channels.gyro_timestamp_us == stamp + 2500 && channels.accel_age_us == 2600 && channels.gyro_age_us == 100);
+    } else {
+        const auto missing = c.get_feedback_imu_channels();
+        assert(missing.accel_timestamp_us == 0 && missing.gyro_timestamp_us == 0);
+        assert(missing.accel_age_us == UINT32_MAX && missing.gyro_age_us == UINT32_MAX);
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == count);
+    }
+
+    if (c.supportsFeedbackImuChannels()) {
+        const auto channels_responder = Wire.responder;
+        kinisi_codec::writeUnsigned(data.data() + 16, UINT32_MAX, 4);
+        assert(c.get_feedback_imu_channels().accel_timestamp_us == stamp && c.lastError().failure == KinisiFailure::NONE);
+        for (uint8_t channel = 0; channel < 2; ++channel) {
+            data.assign(24, 0);
+            kinisi_codec::writeUnsigned(data.data() + 16, UINT32_MAX, 4);
+            kinisi_codec::writeUnsigned(data.data() + 20, UINT32_MAX, 4);
+            kinisi_codec::writeUnsigned(data.data() + 16 + 4 * channel, 10, 4);
+            const auto malformed = c.get_feedback_imu_channels();
+            assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+            assert(malformed.accel_age_us == UINT32_MAX && malformed.gyro_age_us == UINT32_MAX);
+            reset(4, 22);
+            assert(c.begin(1000, 0));
+            Wire.responder = channels_responder;
+        }
+    }
+    expected = KINISI_GET_FEEDBACK_SOURCE_HEALTH;
+    count = Wire.transactions;
+    if (c.supportsFeedbackSourceHealth()) {
+        data.assign(28, 0);
+        struct Record { uint8_t src, state, reason, detail; uint32_t flags, seq; uint64_t stamp; uint32_t age, limit; };
+        const Record records[] = {
+            {0,0,0,0,3,90,stamp,100,300000}, {2,2,9,1,0,0,0,UINT32_MAX,60000},
+            {1,3,0,0,15,42,stamp,200,35000}, {1,1,6,6,131,42,stamp,2100,35000},
+            {1,2,4,4,65,42,stamp,80000,35000}, {1,1,8,0,19,43,stamp+100000,300,35000},
+            {1,0,0,0,UINT32_C(0x80000003),44,stamp+110000,200,35000}
+        };
+        for (const Record& row : records) {
+            source = row.src;
+            data[0] = source; data[1] = row.state; data[2] = row.reason; data[3] = row.detail;
+            kinisi_codec::writeUnsigned(data.data()+4, row.flags, 4);
+            kinisi_codec::writeUnsigned(data.data()+8, row.seq, 4);
+            kinisi_codec::writeUnsigned(data.data()+12, row.stamp, 8);
+            kinisi_codec::writeUnsigned(data.data()+20, row.age, 4);
+            kinisi_codec::writeUnsigned(data.data()+24, row.limit, 4);
+            const auto result = c.get_feedback_source_health(static_cast<KinisiFeedbackSource>(source));
+            assert(c.lastError().failure == KinisiFailure::NONE && result.source == source && result.health == row.state);
+            assert(result.reason == row.reason && result.detail == row.detail && result.flags == row.flags);
+            assert(result.sequence == row.seq && result.timestamp_us == row.stamp && result.age_us == row.age && result.max_age_us == row.limit);
+        }
+        assert(static_cast<uint32_t>(KinisiFeedbackSourceHealthFlag::SATURATION) == 128);
+        assert(static_cast<uint8_t>(KinisiFeedbackSourceHealthState::INDETERMINATE) == 3);
+        const auto health_responder = Wire.responder;
+        auto reconnect = [&]() {
+            reset(4, 22);
+            assert(c.begin(1000, 0));
+            Wire.responder = health_responder;
+        };
+        for (uint8_t index = 0; index < 4; ++index) {
+            const uint8_t saved = data[index];
+            data[index] = 255;
+            const auto missing = c.get_feedback_source_health(source);
+            assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+            assert(missing.source == source && missing.health == 2 && missing.reason == 3 && missing.flags == 0);
+            assert(missing.age_us == UINT32_MAX && missing.timestamp_us == 0);
+            data[index] = saved;
+            reconnect();
+        }
+        data.pop_back();
+        c.get_feedback_source_health(source);
+        assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+        reconnect();
+        Wire.nack = true;
+        const auto failed = c.get_feedback_source_health(source);
+        assert(c.lastError().failure == KinisiFailure::TRANSPORT && failed.source == source && failed.health == 2 && failed.age_us == UINT32_MAX);
+        reconnect();
+        Wire.nack = true;
+        const auto absent = c.get_feedback_imu_channels();
+        assert(c.lastError().failure == KinisiFailure::TRANSPORT && absent.accel_age_us == UINT32_MAX && absent.gyro_age_us == UINT32_MAX);
+        reconnect();
+        device_error = true;
+        c.get_feedback_source_health(source);
+        assert(c.lastError().code == KinisiErrorCode::SENSOR_NOT_AVAILABLE);
+        count = Wire.transactions;
+        c.get_feedback_source_health(KinisiFeedbackSource::NONE);
+        assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == count);
+    } else {
+        const auto missing = c.get_feedback_source_health(KinisiFeedbackSource::IMU_ONLY);
+        assert(missing.source == 1 && missing.health == 2 && missing.reason == 3 && missing.flags == 0);
+        assert(missing.age_us == UINT32_MAX && missing.timestamp_us == 0);
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == count);
+    }
+    struct Board { uint8_t revision, minor, patch; };
+    const Board boards[] = {{4,21,0}, {3,22,0}, {4,22,1}};
+    for (const Board& board : boards) {
+        reset(board.revision, board.minor, board.patch);
+        assert(c.begin(1000,0) && !c.supportsFeedbackSourceHealth() && !c.supportsFeedbackImuChannels());
+        count = Wire.transactions;
+        c.get_feedback_source_health(KinisiFeedbackSource::FUSED);
+        c.get_feedback_imu_channels();
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == count);
+    }
+}
+
+static void imu_mounting() {
+    reset(4, 23);
+    KinisiController c;
+    KinisiImuMountGeometry geometry{};
+    assert(!c.supportsImuMounting() && !c.getImuMountGeometry(geometry) && Wire.transactions == 0);
+    assert(c.begin(1000, 0));
+    const auto before = Wire.transactions;
+    if (KINISI_WIRE_BUFFER_SIZE < 23) {
+        assert(!c.supportsImuMounting() && !c.getImuMountGeometry(geometry));
+        assert(!c.set_imu_mount(0, 0, 0, 0, 0, 0) && Wire.transactions == before);
+        puts("PASS mounting withheld below complete readback capacity");
+        return;
+    }
+    assert(c.supportsImuMounting());
+    const std::vector<uint8_t> golden = {
+        0x50, 0x46, 0xd8, 0xdc, 0xff, 0xff, 0x80, 0x96, 0x98, 0, 0x60, 0x79, 0xfe, 0xff, 1, 0, 0, 0};
+    uint8_t configured = 0;
+    Wire.responder = [&](const std::vector<uint8_t>& bytes) {
+        const uint16_t id = bytes[2] | uint16_t(bytes[3]) << 8;
+        if (bytes[1] == 0x6e) {
+            assert(std::vector<uint8_t>(bytes.begin() + 4, bytes.end()) == golden);
+            Wire.responses.push_back(frame(bytes[1], id));
+        } else {
+            assert(bytes[1] == 0x6f && bytes.size() == 4);
+            auto payload = golden;
+            payload.push_back(configured);
+            Wire.responses.push_back(frame(bytes[1], id, payload));
+        }
+    };
+    assert(c.setImuMountGeometry(180, -90, -.005, 10, -.1, .0000005));
+    for (configured = 0; configured < 2; ++configured) {
+        assert(c.getImuMountGeometry(geometry) && geometry.configured == (configured == 1));
+        assert(geometry.roll_deg == 180 && geometry.pitch_deg == -90 && geometry.yaw_deg == -.01);
+        assert(geometry.x_m == 10 && geometry.y_m == -.1 && geometry.z_m == .000001);
+    }
+    const auto count = Wire.transactions;
+    assert(!c.setImuMountGeometry(NAN, 0, 0, 0, 0, 0));
+    assert(!c.setImuMountGeometry(0, -90.00001, 0, 0, 0, 0));
+    assert(!c.setImuMountGeometry(0, 0, 0, 0, INFINITY, 0));
+    assert(!c.setImuMountGeometry(0, 0, 0, 0, 0, 10.0000001));
+    assert(!c.set_imu_mount(0, 0, -18001, 0, 0, 0));
+    assert(!c.set_imu_mount(0, 0, 0, -10000001L, 0, 0));
+    assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == count);
+    assert(!c.getImuMountGeometry(geometry) && !geometry.configured && geometry.roll_deg == 0);
+    assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE && !c.ready());
+    reset(4, 23);
+    assert(c.begin(1000, 0));
+    Wire.responder = [](const std::vector<uint8_t>& bytes) {
+        std::vector<uint8_t> malformed(19);
+        kinisi_codec::writeUnsigned(malformed.data() + 6, 10031099UL, 4);
+        Wire.responses.push_back(frame(bytes[1], bytes[2] | uint16_t(bytes[3]) << 8, malformed));
+    };
+    assert(!c.getImuMountGeometry(geometry) && !c.ready());
+    assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    for (auto board : {3, 4, 5}) {
+        reset(board, board == 4 ? 22 : 23);
+        assert(c.begin(1000, 0) && !c.supportsImuMounting());
+        const auto sent = Wire.transactions;
+        assert(!c.getImuMountGeometry(geometry) && !c.set_imu_mount(0, 0, 0, 0, 0, 0));
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == sent);
+    }
+    reset(4, 23);
+    assert(c.begin(1000, 0));
+    Wire.responder = [](const std::vector<uint8_t>& bytes) {
+        Wire.responses.push_back(frame(KINISI_ERROR, bytes[2] | uint16_t(bytes[3]) << 8,
+            {bytes[1], uint8_t(KinisiErrorCode::SOURCE_SWITCH_UNSAFE)}));
+    };
+    assert(!c.setImuMountGeometry(90, 0, 0, 0, -.1, 0));
+    assert(c.lastError().code == KinisiErrorCode::SOURCE_SWITCH_UNSAFE && c.ready());
+    puts("PASS mounting readiness, signed units, readback and refusal");
+}
+
+static void board_mounting() {
+    KinisiController c;
+    KinisiBoardMountGeometry mount{};
+    reset(4, 24);
+    assert(!c.supportsBoardMounting() && !c.getBoardMountGeometry(mount) && Wire.transactions == 0);
+    for (auto minor : {3, 4, 5}) {
+        reset(minor, minor == 4 ? 23 : 24);
+        assert(c.begin(1000, 0) && !c.supportsBoardMounting());
+        const auto before = Wire.transactions;
+        assert(!c.getBoardMountGeometry(mount) && !c.setBoardMountGeometry(0, 0, 0, 0, 0, 0));
+        assert(c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND && Wire.transactions == before);
+    }
+    reset(4, 24);
+    assert(c.begin(1000, 0));
+    const auto before = Wire.transactions;
+    if (KINISI_WIRE_BUFFER_SIZE < 23) {
+        assert(!c.supportsBoardMounting() && !c.getBoardMountGeometry(mount) && Wire.transactions == before);
+        return;
+    }
+    assert(c.supportsBoardMounting() && c.supportsImuMounting());
+    const std::vector<uint8_t> center = {0x28, 0x23, 0, 0, 0xff, 0xff, 0, 0, 0, 0,
+        0x60, 0x79, 0xfe, 0xff, 1, 0, 0, 0};
+    std::vector<uint8_t> reply(19);
+    uint8_t expected = 0x86;
+    Wire.responder = [&](const std::vector<uint8_t>& bytes) {
+        const uint16_t id = bytes[2] | uint16_t(bytes[3]) << 8;
+        assert(bytes[1] == expected);
+        if (expected == 0x85 || expected == 0x6e) {
+            assert(std::vector<uint8_t>(bytes.begin() + 4, bytes.end()) == center);
+            Wire.responses.push_back(frame(expected, id));
+        } else {
+            assert(bytes.size() == 4);
+            Wire.responses.push_back(frame(expected, id, reply));
+        }
+    };
+    assert(c.getBoardMountGeometry(mount) && !mount.configured && mount.y_m == 0);
+    expected = 0x85;
+    assert(c.setBoardMountGeometry(90, 0, -.005, 0, -.1, .0000005));
+    expected = 0x86;
+    reply = center;
+    reply.push_back(1);
+    assert(c.getBoardMountGeometry(mount) && mount.configured && mount.roll_deg == 90 &&
+           mount.yaw_deg == -.01 && mount.y_m == -.1 && mount.z_m == .000001);
+    expected = 0x6e;
+    assert(c.setImuMountGeometry(90, 0, -.005, 0, -.1, .0000005));
+    kinisi_codec::writeUnsigned(reply.data() + 6, static_cast<uint32_t>(-10031098L), 4);
+    kinisi_codec::writeUnsigned(reply.data() + 10, 10031098UL, 4);
+    expected = 0x6f;
+    assert(c.get_imu_mount().x_um == -10031098L && c.ready());
+    expected = 0x86;
+    assert(c.get_board_mount().y_um == 10031098L && c.ready());
+    const auto count = Wire.transactions;
+    assert(!c.setBoardMountGeometry(0, NAN, 0, 0, 0, 0));
+    assert(!c.setBoardMountGeometry(0, 0, 0, 0, -10.0000001, 0));
+    assert(!c.set_board_mount(0, 0, 0, 10000001L, 0, 0));
+    assert(c.lastError().failure == KinisiFailure::INVALID_ARGUMENT && Wire.transactions == count);
+    kinisi_codec::writeUnsigned(reply.data() + 6, 10031099UL, 4);
+    assert(!c.getBoardMountGeometry(mount) && !mount.configured && !c.ready());
+    assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    reset(4, 25);
+    assert(c.begin(1000, 0) && c.supportsBoardMounting());
+    Wire.responder = [](const std::vector<uint8_t>& bytes) {
+        assert(bytes[1] == 0x85);
+        Wire.responses.push_back(frame(KINISI_ERROR, bytes[2] | uint16_t(bytes[3]) << 8,
+            {bytes[1], uint8_t(KinisiErrorCode::SOURCE_SWITCH_UNSAFE)}));
+    };
+    assert(!c.setBoardMountGeometry(0, 0, 0, 0, 0, 0));
+    assert(c.lastError().code == KinisiErrorCode::SOURCE_SWITCH_UNSAFE && c.ready());
+    for (uint8_t flag : {0, 2}) {
+        reset(4, 24);
+        assert(c.begin(1000, 0));
+        Wire.responder = [flag](const std::vector<uint8_t>& bytes) {
+            assert(bytes[1] == 0x86);
+            std::vector<uint8_t> invalid(19);
+            invalid[0] = 1;
+            invalid[18] = flag;
+            Wire.responses.push_back(frame(bytes[1], bytes[2] | uint16_t(bytes[3]) << 8, invalid));
+        };
+        assert(!c.getBoardMountGeometry(mount) && !mount.configured && !c.ready());
+        assert(c.lastError().failure == KinisiFailure::MALFORMED_RESPONSE);
+    }
+    puts("PASS board-center mount frames, limits, chip compatibility and refusal");
+}
+
+static void mecanum_roller_orientation() {
+    using Orientation = KinisiMecanumRollerOrientation;
+    KinisiController c;
+    auto initialize = [&](Orientation layout) {
+        return c.initialize_mecanum_platform_oriented(true,false,true,false,false,true,false,true,
+                                                      .34,.26,.1,4096.,layout);
+    };
+    Orientation applied = Orientation::MIRRORED;
+    reset(3, 24);
+    assert(c.begin(1000, 0));
+    auto before = Wire.transactions;
+    assert(c.getMecanumRollerOrientation(applied) && applied == Orientation::STANDARD);
+    assert(!initialize(Orientation::MIRRORED) && c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND);
+    assert(Wire.transactions == before);
+    for (uint8_t revision : {3, 4}) {
+        reset(revision, 25);
+        assert(c.begin(1000, 0));
+        Wire.responder = [](const std::vector<uint8_t>& r) {
+            const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+            if (r[1] == KINISI_GET_CONFIGURATION_FIELD) {
+                assert(r.size() == 6 && r[4] == 7 && r[5] == 0);
+                Wire.responses.push_back(frame(r[1], id, {0,0,0,0,0,0,0xf0,0x3f}));
+            } else {
+                assert(r.size() == (r[1] == 0x87 ? 45U : 44U));
+                assert(r[1] == 0x30 || r[1] == 0x87);
+                assert(r[0] == r.size() - 1);
+                assert(r[4] == 1 && r[5] == 0 && r[6] == 1 && r[7] == 0);
+                assert(r[8] == 0 && r[9] == 1 && r[10] == 0 && r[11] == 1);
+                assert(kinisi_codec::readDouble(r.data()+12) == .34 && kinisi_codec::readDouble(r.data()+20) == .26);
+                assert(kinisi_codec::readDouble(r.data()+28) == .1 && kinisi_codec::readDouble(r.data()+36) == 4096.);
+                if (r[1] == 0x87) assert(r[44] == 1);
+                Wire.responses.push_back(frame(r[1], id));
+            }
+        };
+        before = Wire.transactions;
+        assert(!initialize(static_cast<Orientation>(2)) && c.lastError().failure == KinisiFailure::INVALID_ARGUMENT);
+        assert(Wire.transactions == before);
+        bool legacy = c.initialize_mecanum_platform(true,false,true,false,false,true,false,true,.34,.26,.1,4096.);
+        assert(legacy == (KINISI_WIRE_BUFFER_SIZE >= 44));
+        if (!legacy) assert(c.lastError().failure == KinisiFailure::FRAME_TOO_LARGE);
+        assert(Wire.transactions == before + size_t(legacy));
+        assert(initialize(Orientation::MIRRORED) == (KINISI_WIRE_BUFFER_SIZE >= 45));
+        if (KINISI_WIRE_BUFFER_SIZE < 45) assert(c.lastError().failure == KinisiFailure::FRAME_TOO_LARGE);
+        assert(Wire.transactions == before + size_t(legacy) + size_t(KINISI_WIRE_BUFFER_SIZE >= 45));
+        assert(c.getMecanumRollerOrientation(applied) && applied == Orientation::MIRRORED);
+    }
+}
+
+static void omni_wheel_orientation() {
+    using Layout = KinisiOmniWheelOrientation;
+    KinisiController c;
+    auto initialize = [&](Layout layout) {
+        return c.initialize_omni_platform_oriented(true,false,true,false,true,false,.1,.17,4096.,layout);
+    };
+    reset(3,25);
+    assert(c.begin(1000,0));
+    auto before = Wire.transactions;
+    Layout applied = Layout::FRONT;
+    assert(c.getOmniWheelOrientation(applied) && applied == Layout::REAR);
+    assert(!initialize(Layout::FRONT) && c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND);
+    assert(Wire.transactions == before);
+    for (uint8_t revision : {3, 4}) {
+        reset(revision,26);
+        assert(c.begin(1000,0));
+        for (Layout layout : {Layout::REAR, Layout::FRONT}) {
+            Wire.responder = [layout](const std::vector<uint8_t>& r) {
+                const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+                if (r[1] == KINISI_GET_CONFIGURATION_FIELD) {
+                    assert(r.size() == 6 && r[4] == 8 && r[5] == 0);
+                    std::vector<uint8_t> response(8);
+                    kinisi_codec::writeDouble(response.data(), static_cast<uint8_t>(layout));
+                    Wire.responses.push_back(frame(r[1], id, response));
+                } else {
+                    assert(r[1] == 0x31 || r[1] == 0x88);
+                    assert(r.size() == (r[1] == 0x88 ? 35U : 34U));
+                    assert(r[4] && !r[5] && r[6] && !r[7] && r[8] && !r[9]);
+                    assert(kinisi_codec::readDouble(r.data()+10) == .1);
+                    assert(kinisi_codec::readDouble(r.data()+18) == .17);
+                    assert(kinisi_codec::readDouble(r.data()+26) == 4096.);
+                    if (r[1] == 0x88) assert(r[34] == static_cast<uint8_t>(layout));
+                    Wire.responses.push_back(frame(r[1], id));
+                }
+            };
+            before = Wire.transactions;
+            assert(!initialize(static_cast<Layout>(2)) && c.lastError().failure == KinisiFailure::INVALID_ARGUMENT);
+            const bool legacy = c.initialize_omni_platform(true,false,true,false,true,false,.1,.17,4096.);
+            assert(legacy == (KINISI_WIRE_BUFFER_SIZE >= 34));
+            if (!legacy) assert(c.lastError().failure == KinisiFailure::FRAME_TOO_LARGE);
+            assert(initialize(layout) == (KINISI_WIRE_BUFFER_SIZE >= 35));
+            if (KINISI_WIRE_BUFFER_SIZE < 35) assert(c.lastError().failure == KinisiFailure::FRAME_TOO_LARGE);
+            assert(Wire.transactions == before + size_t(legacy) + size_t(KINISI_WIRE_BUFFER_SIZE >= 35));
+            assert(c.getOmniWheelOrientation(applied) && applied == layout);
+        }
+    }
+}
+
 int main() {
+    omni_wheel_orientation();
+    mecanum_roller_orientation();
+    board_mounting();
+    imu_mounting();
+    feedback_health();
+    if (KINISI_WIRE_BUFFER_SIZE < 32) {
+        reset(4, 21);
+        KinisiController controller;
+        assert(controller.begin(1000, 0) && !controller.supportsFeedbackSourceSelector());
+        const auto transactions = Wire.transactions;
+        assert(!controller.set_feedback_source(KinisiFeedbackSource::IMU_ONLY));
+        controller.get_feedback_source_status();
+        controller.get_feedback_source_vector(KinisiFeedbackSourceVectorKind::POSE, 3, 42);
+        assert(!controller.set_feedback_fusion_mount(0));
+        controller.get_feedback_fusion_mount();
+        assert(Wire.transactions == transactions && controller.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND);
+        puts("PASS selector withheld when Wire cannot carry a complete vector");
+        return 0;
+    }
+    feedback_source_selector();
+    imu_tracking();
+    fusion_experiment();
+    legacy_driver_sleep();
+    board_idle();
+    board_idle(3, 0, 18);
+    board_idle(3, 1, 18);
+    board_idle(3, 1, 19);
+    driver_sleep();
+    configuration_save();
     pwm_frequencies();
     current_limits();
     clear_faults();

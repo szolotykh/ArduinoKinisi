@@ -5,12 +5,42 @@ identifies the SDK as Arduino 2.5.0, reads the controller identity, and waits fo
 READY. `boardInfo()` exposes hardware revision, protocol version and firmware Git
 build identity; `ready()` reports session readiness.
 
-The library includes protocol 2.11 commands while accepting firmware 2.1+ within
+The library includes protocol 2.26 commands while accepting firmware 2.1+ within
 protocol major 2. Major versions break existing wire interfaces and must match.
 Minor versions add compatible commands; patch versions provide compatible fixes
 and do not block connection. New commands are gated individually. Protocol
 versions are independent of SDK releases and physical board revisions; INIT
 does not translate between major versions.
+
+## Three-wheel Omni layout over Wire
+
+`initialize_omni_platform(...)` configures the original triangle with W2 at the rear. Protocol 2.26 adds an initializer for either single-wheel position. For the front layout, turn the entire triangle 180° in the robot frame. W2 sits at the front, W0 at rear left and W1 at rear right. Use the corresponding motor and encoder ports and set each wheel's polarity independently.
+
+```cpp
+using Layout = KinisiOmniWheelOrientation;
+if (!controller.initialize_omni_platform_oriented(
+        false, false, false, false, false, false,
+        0.10, 0.17, 4096, Layout::FRONT)) return;
+Layout applied;
+if (!controller.getOmniWheelOrientation(applied)) return;
+```
+
+The original initializer needs a 34-byte Wire write and the oriented initializer needs 35 bytes. A 32-byte AVR Wire buffer rejects both before transmission. Use a core with sufficient actual TX capacity and set `KINISI_WIRE_BUFFER_SIZE` to match, or initialize over USB. The six-byte query and twelve-byte reply fit the default Wire buffer. Earlier firmware supports the original initializer and the SDK returns `REAR` locally.
+
+## Four-wheel mecanum layout over Wire
+
+`initialize_mecanum_platform(...)` selects the standard arrangement. Its complete I²C write is 44 bytes. Protocol 2.25 adds `initialize_mecanum_platform_oriented(..., layout)`, requiring 45 bytes in one write. Both exceed the default 32-byte AVR Wire buffer. On such a host the SDK returns `FRAME_TOO_LARGE` before transmission. Use a Wire implementation with sufficient actual TX capacity and a matching `KINISI_WIRE_BUFFER_SIZE`, or configure over USB with the Python SDK. The 6-byte orientation query and 12-byte reply fit the default Wire buffer. On pre-2.25 firmware the SDK returns the fixed `STANDARD` layout locally.
+
+```cpp
+using Layout = KinisiMecanumRollerOrientation;
+if (!controller.initialize_mecanum_platform_oriented(
+        false, false, false, false, false, false, false, false,
+        0.34, 0.26, 0.10, 4096, Layout::MIRRORED)) return;
+Layout applied;
+if (!controller.getMecanumRollerOrientation(applied)) return;
+```
+
+Motor and encoder indices 0–3 are front right, rear right, rear left and front left. Length and width are the front-to-rear and side-to-side wheel-center spacings in metres. The mirrored layout needs unequal spacings to control yaw. Each wheel's motor and encoder reversal settings remain independent.
 
 The SDK advertises subscription support and **no wall-clock capability**. The board
 uses uptime and skips time-sync exchanges, including periodic sync. Call `poll()`
@@ -242,7 +272,8 @@ The default is available as `pwm_frequency.default_hz`.
 Applying a frequency stops every motor and motor/platform controller and leaves
 them stopped. It preserves duty-cycle resolution, motor direction configuration,
 and driver current-limit settings. Restart motion explicitly. The selected frequency
-survives motor initialization and disconnect/reconnect; reboot restores the default.
+survives motor initialization and reconnects. At boot, v0.4 restores an explicitly
+saved frequency when a valid setup exists. Otherwise the board uses its default.
 GET reads the board's active frequency selection without changing outputs.
 Unsupported values are rejected; they are never silently rounded.
 
@@ -262,3 +293,211 @@ Wire buffer. `frequency_count` delimits `options->supported_hz`.
 
 Unknown boards have no advertised options; explicit commands on compatible firmware
 still reach the board for validation. Older firmware is rejected locally before I/O.
+
+## Save and restore the platform setup
+
+On a ready v0.4 board with protocol 2.14 or later, `supportsConfigurationSave()`
+reports whether configuration storage is available. Initialize the platform and
+apply the desired encoder settings, directions and PWM frequency. Calling
+`save_configuration()` returns true after the firmware acknowledges a durable write. On failure it returns false and `lastError()` gives the reason.
+
+After restart, connect and read the running setup before sending another
+platform initialization. `get_configuration_field(field, index)` reads the
+platform type (0), wheel diameter (1), track or length (2), width or radius
+(3), encoder resolution (4), encoder direction (5), or motor direction (6).
+Use index zero for platform fields and the channel index for encoder and
+motor fields. `get_pwm_frequency()` reads the applied frequency in hertz.
+The board restores the saved setup with outputs stopped. Reconnecting during
+the same boot preserves running edits. Call Save again to retain those edits
+across the next restart.
+
+## Motor-driver sleep
+
+`supportsDriverSleep()` requires READY, protocol major version 2, and an exact
+known board profile with `power.driver_sleep` enabled. Original v0.3.0 and Nano
+(hardware v0.3.1) require protocol 2.17 or later; v0.4.0 requires 2.15 or later.
+Both commands reject unsupported sessions before I/O, including unknown patch
+revisions. Nano's product name does not change its wire identity: model 1, 0.3.1.
+
+```cpp
+if (controller.supportsDriverSleep()) {
+    if (controller.set_driver_sleep(1)) {  // Board ACK received.
+        uint8_t sleeping = controller.get_driver_sleep();
+        if (controller.lastError().failure == KinisiFailure::NONE) {
+            Serial.println(sleeping);
+        }
+    }
+    bool released = controller.set_driver_sleep(0);  // Wait for release ACK.
+    if (!released) { /* Inspect controller.lastError() before retrying. */ }
+}
+```
+
+The setter accepts uint8_t values 0 or 1 and returns false on failure. The
+getter returns 0 or 1, and also returns zero on failure: always check
+`lastError()` before treating zero as a released inhibit. Requests and responses
+fit the default 32-byte Wire buffer.
+
+Sleep stops and coasts all motors, cancels active control, and inhibits new
+drive requests while communication remains available. The getter reads the
+board-wide inhibit shared by all clients; zero does not imply that every
+individual motor is initialized. Wake leaves outputs stopped. Initialize or
+start closed-loop control again before issuing new targets. Prohibited
+operations report `KinisiErrorCode::DRIVERS_ASLEEP` (19) in `lastError()`.
+A failed wake leaves the inhibit set; correct the cause and explicitly retry.
+A stale wake superseded by a newer sleep reports `DRIVERS_ASLEEP`; read the
+current inhibit and explicitly retry only if release is still wanted.
+
+On v0.3/Nano, sleep holds both DRV8870 inputs low. Releasing the software
+inhibit keeps those inputs low until a fresh nonzero drive request or deliberate
+brake, so a zero readback does not establish that the chips are physically awake.
+After confirmed inhibit release, a fresh `brake_motor()` or `brake_platform()`
+request is valid without a preceding drive request, subject to the command's
+normal initialization requirements. Ordinary short brake drives both inputs
+high; stop/coast leaves both low. Brake requests made while inhibited, or stale
+requests from before the inhibit transition, are rejected.
+These boards have no SPI wake verification, current telemetry or fault readback.
+Their separate board-idle API requires protocol 2.18 or later.
+On v0.4, wake verifies retained settings for initialized drivers.
+
+Sleep is volatile and is not saved to FRAM. Reconnecting preserves its current
+state and sends no automatic sleep or wake command. Reset clears the inhibit
+and follows the board's normal boot and saved-configuration policy.
+
+## Communication-preserving board idle
+
+`supportsBoardIdle()` requires READY, protocol major version 2 and the exact
+board profile's `power.board_idle` capability. Original v0.3.0 and Nano v0.3.1
+require protocol 2.18 or later; v0.4.0 requires 2.16 or later. Older firmware
+and unknown revisions fail locally before I/O. Driver-only sleep remains
+available on v0.3/Nano at protocol 2.17 and v0.4 at protocol 2.15.
+
+```cpp
+if (controller.supportsBoardIdle()) {
+    if (controller.set_board_idle(1)) {  // Board ACK received.
+        uint8_t idle = controller.get_board_idle();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(idle);
+    }
+    bool awake = controller.set_board_idle(0);  // Explicit wake, outputs stopped.
+    if (!awake) { /* Inspect lastError(), correct the cause, then retry. */ }
+}
+```
+
+The setter accepts uint8_t values 0 or 1 and returns false on failure. The
+getter returns 0 or 1, or zero on failure: check `lastError()` before interpreting
+zero as awake. Both commands fit the default 32-byte Wire buffer.
+
+This is shallow idle with communication running, not MCU STOP or STANDBY.
+Entry stops control, inhibits the drivers, and pauses existing subscriptions.
+Heartbeat, time sync and supported direct reads remain available. New
+subscriptions and independent driver-sleep changes report `KinisiErrorCode::BOARD_IDLE`
+(20) through `lastError()`. Motion requests report `DRIVERS_ASLEEP` (19).
+The I2C SDK session stays connected; the board also keeps its USB session
+available for ordinary enter/read/wake requests. No reconnect or initialization
+is needed for an idle transition. Keep calling
+`poll()` to service communication while idle.
+
+Wake preserves an independent driver-sleep request that was active on entry.
+Otherwise it clears the idle-imposed inhibit and leaves outputs stopped.
+v0.4 verifies initialized driver settings over SPI. On v0.3/Nano, both DRV8870
+inputs remain low until a fresh nonzero drive or explicit short-brake request;
+successful wake acknowledges the software state, not physical chip wake.
+Read `get_driver_sleep()` separately; it reports the effective inhibit, including
+board idle, and cannot reveal the prior independent sleep request while idle.
+Waking the board does not necessarily wake its drivers. A failed transition keeps idle and motion inhibition active
+for an explicit retry. The SDK sends no extra driver, initialization,
+controller-start, or motion commands around idle transitions. Reconnect does
+not wake the board. Idle is volatile and clears on reset.
+
+`getSubscriptionSample()`, `getSubscribedEncoderOdometry()` and
+`getSubscribedPlatformOdometry()` retain the last sample and its original
+`timestamp_us` through idle and wake. A true return value means cached data is
+available; it does not certify freshness. Frames buffered before entry may
+still arrive. Track sample timestamps in their clock domain and wait for a new
+post-wake sample before using streamed data as current. Existing streams resume
+without resubscribing; a direct read does not refresh the subscription cache.
+
+## Encoder and IMU experiment
+
+Exact v0.4.0 boards with protocol 2.19 can opt into the volatile comparison
+experiment. Legacy encoder control remains the default. See [mounting, health,
+compact diagnostics and examples](fusion-experiment.md).
+
+## IMU-only relative tracking
+
+See [IMU-only relative tracking](imu-tracking.md) for the protocol 2.20 opt-in,
+stationary calibration, bounded horizon and diagnostics. Protocol 2.24 provides a
+[board-center mounting configuration](imu-mounting.md) for rotated and displaced boards.
+
+## Tracking source selector
+
+A ready model 1 board with hardware 0.4.0 and protocol 2.21+ can report encoder,
+IMU-only or passive fused tracking. Encoder is the default. Call
+`set_feedback_source(source)` only while stopped and disarmed, with the motors
+coasting and a quiet encoder observation. `SOURCE_SWITCH_UNSAFE` leaves the previous
+preference in place. Selection never starts a producer, commands motion or enables
+a control loop. Prepare the required producer explicitly.
+
+- Encoder and passive fused tracking require initialized platform odometry.
+- The passive observer requires mounting geometry. Use the shared physical mount
+  on protocol 2.24+. With legacy yaw-only setup, declare a centered, level board
+  with +Z up using `set_feedback_fusion_mount(yaw)`. Yaw is the angle of board
+  +X in chassis XY, counterclockwise about chassis +Z, in radians. The legacy
+  declaration is volatile. Read `get_feedback_fusion_mount()` to check it.
+- IMU-only tracking requires the stationary mounting declaration and cold calibration
+  described above. Its one-second diagnostic window begins at the producer origin.
+  Re-selecting a source does not extend the window.
+
+The board reports `requested`, `active`, `valid`, `reason` and the native
+`source_detail`. Loss or expiry gives active NONE. Discard old estimates on source
+loss, a change in `origin_id`, or reconnect. Pose uses metres and continuous radians
+relative to the selector origin. Twist uses chassis forward/left metres per second
+and counterclockwise radians per second. The producer supplies `sequence` and the
+board-monotonic acquisition `timestamp_us`. Raw status reports `age_us` at capture.
+The snapshot helper returns the original sequence, timestamp and vectors, with
+the original sample's age calculated at the confirming status read from the two
+board timestamps and the board-reported age. `UINT32_MAX` means unavailable.
+
+When using raw commands, capture status first and pass its `origin_id` and
+`sequence` to both `get_feedback_source_vector(kind, origin_id, sequence)` calls.
+Confirm the same healthy source and origin with a final status read. Normal
+publication advances may occur between requests. The board retains eight distinct
+captures for up to 50 ms and rechecks producer eligibility for both vector reads.
+Compare the original sample's current age with the smaller `max_age_ms` from
+the two status reads, converting milliseconds to microseconds. An encoder's
+source-age limit is three configured odometry periods. Read current status after
+reconnect.
+
+Only explicit `save_configuration()` persists the requested preference with the
+rest of the running setup. Reboot requires a fresh mount or calibration as applicable.
+Restored preference is observable in selector status after reboot. Tracking data,
+origin and controller targets are volatile.
+
+The complete selector requires a Wire buffer of at least 32 bytes. On a smaller
+buffer `supportsFeedbackSourceSelector()` returns false and selector requests fail
+locally. Call `controller.readFeedbackSourceSnapshot(status, pose, twist)` and branch on
+`KinisiFeedbackRead`. `VALID` supplies a matched sample. `UNAVAILABLE` supplies a
+board-reported invalid status. `CHANGED` means three successive reads could not
+establish a common sample. `ERROR` preserves the transport or controller failure in
+`lastError()`. Vectors are cleared on every result other than `VALID`. A failed write
+requires explicit readback before deciding whether to retry.
+
+## Feedback source health
+
+On a READY model 1 v0.4.0 board running protocol 2.22 or later in the 2.x series, read the encoder batch, physical BMI088 pair, or passive fused estimate by source. Each read returns the board's current health, reason, native fusion fault detail, flags, sequence, acquisition timestamp, age and maximum age. Reads work independently of the selected source and leave the motion state untouched. The physical BMI088 may remain healthy after the separate finite IMU tracking estimate expires.
+
+```cpp
+if (controller.supportsFeedbackSourceHealth()) {
+    const auto imu = controller.get_feedback_source_health(KinisiFeedbackSource::IMU_ONLY);
+    if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(imu.health);
+}
+if (controller.supportsFeedbackImuChannels()) {
+    const auto channels = controller.get_feedback_imu_channels();
+    if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(channels.gyro_age_us);
+}
+```
+
+Timestamps and ages use board-clock microseconds. A source can retain its last timestamp and sequence during an outage. An unseen source reports zero timestamp and sequence with age `UINT32_MAX`. The separate channel read gives the latest accelerometer and gyro timestamps and ages, including one-sided outages. A usable BMI088 pair must meet the 35,000 µs age and 15,000 µs skew limits.
+
+Read health and flags together. `FRESH` describes the represented sample's age. `COMPARISON_AVAILABLE` indicates whether the producers can be compared. `DISAGREEMENT` identifies conflicting measurements without assigning blame. A subsequent read returns the board's recovery state and updated provenance.
+
+The health reply needs a 32-byte Wire buffer, including framing. The channel reply fits 28 bytes. Each support method checks the capacity for its own reply. A failed health getter returns the queried source with unavailable health, zero provenance and unknown age. A failed channel getter returns zero timestamps and unknown ages. Check `lastError()` to distinguish a failed transaction from an unavailable producer reported by a successful read.

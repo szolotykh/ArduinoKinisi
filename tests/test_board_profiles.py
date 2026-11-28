@@ -30,8 +30,24 @@ class ProfileTests(unittest.TestCase):
     def setUp(self):
         self.bundle = json.loads((ROOT / 'tools/board_profiles.json').read_text(encoding='utf-8'))
 
+    def test_generated_mini_geometry_uses_input_vector(self):
+        mini = self.bundle['boards'][-1]
+        self.assertEqual(mini['imu_geometry']['underside_center_to_imu_um'], [-15373, 26953, 2075])
+        mini['imu_geometry']['underside_center_to_imu_um'] = [105, -206, 307]
+        self.assertIn('{true, {105, -206, 307}}', profiles.generate(self.bundle)['kinisi_board_profiles.cpp'])
+        del mini['imu_geometry']
+        profiles.generate(self.bundle)
+        for invalid in ([1, 2], [False, 2, 3], [1.0, 2, 3], [1, 2, 2**31], [-2**31-1, 2, 3]):
+            mini['imu_geometry'] = {'underside_center_to_imu_um': invalid}
+            with self.assertRaises(ValueError):
+                profiles.generate(self.bundle)
+        del mini['imu_geometry']
+        self.bundle['boards'][0]['imu_geometry'] = {'underside_center_to_imu_um': [1, 2, 3]}
+        with self.assertRaises(ValueError):
+            profiles.generate(self.bundle)
+
     def test_current_profiles_and_flash_storage(self):
-        self.assertEqual(len(self.bundle['boards']), 4)
+        self.assertEqual(len(self.bundle['boards']), 5)
         for name, content in profiles.generate(self.bundle).items():
             self.assertEqual((ROOT / name).read_text(encoding='utf-8'), content)
         source = profiles.generate(self.bundle)['kinisi_board_profiles.cpp']
@@ -47,20 +63,30 @@ class ProfileTests(unittest.TestCase):
             lambda b: b['boards'].append(deepcopy(b['boards'][0])),
             lambda b: b['boards'][0]['board'].update(build_define='MP_V1'),
             lambda b: b['boards'][0]['resources'].update(motors=True),
-            lambda b: b['boards'][3]['sensors']['imu'][0].update(id=1),
-            lambda b: b['boards'][3]['motor_features'][0].update(current_limit='yes'),
+            lambda b: b['boards'][4]['power'].update(driver_sleep=1),
+            lambda b: b['boards'][4]['power'].update(board_idle=1),
+            lambda b: b['boards'][4]['power'].update(sleep_pin='PB0'),
+            lambda b: b['boards'][4]['sensors']['imu'][0].update(id=1),
+            lambda b: b['boards'][4]['motor_features'][0].update(current_limit='yes'),
         ):
             bundle = deepcopy(self.bundle); mutate(bundle)
             with self.assertRaises(ValueError):
                 profiles.generate(bundle)
 
     def test_multiple_sensor_metadata_is_generated_from_input(self):
-        self.bundle['boards'][3]['sensors']['temperature'].append({'id': 1})
-        self.bundle['boards'][3]['sensors']['imu'].append({'id': 1, 'accelerometer': True, 'gyroscope': False})
+        self.bundle['boards'][4]['sensors']['temperature'].append({'id': 1})
+        self.bundle['boards'][4]['sensors']['imu'].append({'id': 1, 'accelerometer': True, 'gyroscope': False})
         generated = profiles.generate(self.bundle)
         self.assertIn('temperature_ids[2]', generated['kinisi_board_profiles.h'])
         self.assertIn('KinisiImuFeatures imu[2]', generated['kinisi_board_profiles.h'])
         self.assertIn('2, {0, 1}, 2, {{0, true, true}, {1, true, false}}', generated['kinisi_board_profiles.cpp'])
+
+    def test_older_power_profiles_remain_valid(self):
+        for profile in self.bundle['boards']:
+            self.assertEqual(profile['power']['board_idle'], profile['board']['revision'] in ('0.3.0', '0.3.1', '0.4.0'))
+            profile['power'].pop('board_idle')
+        generated = profiles.generate(self.bundle)
+        self.assertIn('{true, false}', generated['kinisi_board_profiles.cpp'])
 
     def test_local_import_check_and_rejected_import_preserve_files(self):
         with tempfile.TemporaryDirectory() as directory:

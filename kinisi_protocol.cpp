@@ -5,6 +5,16 @@
 #include <string.h>
 #include <math.h>
 
+static bool validMount(const uint8_t* bytes, int32_t offsetLimit) {
+    for (uint8_t i = 0; i < 3; ++i) {
+        const int16_t angle = static_cast<int16_t>(kinisi_codec::readUnsigned(bytes + 2 * i, 2));
+        const int16_t limit = i == 1 ? 9000 : 18000;
+        const int32_t offset = static_cast<int32_t>(kinisi_codec::readUnsigned(bytes + 6 + 4 * i, 4));
+        if (angle < -limit || angle > limit || offset < -offsetLimit || offset > offsetLimit) return false;
+    }
+    return true;
+}
+
 /** Initialize local state without starting any bus traffic. */
 KinisiProtocol::KinisiProtocol(uint8_t address)
     : address_(address), next_id_(1), timeout_ms_(1000), ready_(false), identity_(), profile_(), profile_known_(false), error_(),
@@ -151,6 +161,67 @@ bool KinisiProtocol::supportsSensor(KinisiSensor kind, uint8_t index) const {
 const KinisiPwmFrequencyOptions* KinisiProtocol::getPwmFrequencyOptions() const {
     return profile_known_ && profile_.pwm_frequency.frequency_count ? &profile_.pwm_frequency : nullptr;
 }
+bool KinisiProtocol::supportsConfigurationSave() const {
+    return ready_ && profile_known_ && identity_.board_model == 1 &&
+        identity_.board_major == 0 && identity_.board_minor == 4 && identity_.board_patch == 0 &&
+        identity_.protocol_major == 2 && identity_.protocol_minor >= 14;
+}
+bool KinisiProtocol::supportsDriverSleep() const {
+    if (!ready_ || !profile_known_ || !profile_.power.driver_sleep ||
+            identity_.protocol_major != 2 || identity_.board_model != 1 || identity_.board_major != 0)
+        return false;
+    if (identity_.board_minor == 3 && identity_.board_patch <= 1)
+        return identity_.protocol_minor >= 17;
+    return identity_.board_minor == 4 && identity_.board_patch == 0 && identity_.protocol_minor >= 15;
+}
+bool KinisiProtocol::supportsFusionExperiment() const {
+    return ready_ && profile_known_ && profile_.capabilities.fusion_experiment &&
+        identity_.board_model == 1 && identity_.board_major == 0 &&
+        identity_.board_minor == 4 && identity_.board_patch == 0 &&
+        identity_.protocol_major == 2 && identity_.protocol_minor >= 19;
+}
+
+bool KinisiProtocol::supportsFeedbackImuChannels() const {
+    return KINISI_WIRE_BUFFER_SIZE >= 28 && ready_ && profile_known_ && profile_.capabilities.feedback_source_health &&
+        identity_.board_model == 1 && identity_.board_major == 0 && identity_.board_minor == 4 &&
+        identity_.board_patch == 0 && identity_.protocol_major == 2 && identity_.protocol_minor >= 22;
+}
+
+bool KinisiProtocol::supportsFeedbackSourceHealth() const {
+    return KINISI_WIRE_BUFFER_SIZE >= 32 && supportsFeedbackImuChannels();
+}
+
+bool KinisiProtocol::supportsImuMounting() const {
+    return KINISI_WIRE_BUFFER_SIZE >= 23 && ready_ && profile_known_ && profile_.capabilities.imu_mounting &&
+        identity_.board_model == 1 && identity_.board_major == 0 && identity_.board_minor == 4 &&
+        identity_.board_patch == 0 && identity_.protocol_major == 2 && identity_.protocol_minor >= 23;
+}
+
+bool KinisiProtocol::supportsBoardMounting() const {
+    return supportsImuMounting() && identity_.protocol_minor >= 24;
+}
+
+bool KinisiProtocol::supportsFeedbackSourceSelector() const {
+    return KINISI_WIRE_BUFFER_SIZE >= 32 && ready_ && profile_known_ && profile_.capabilities.feedback_source_selector &&
+        identity_.board_model == 1 && identity_.board_major == 0 &&
+        identity_.board_minor == 4 && identity_.board_patch == 0 &&
+        identity_.protocol_major == 2 && identity_.protocol_minor >= 21;
+}
+
+bool KinisiProtocol::supportsImuTracking() const {
+    return ready_ && profile_known_ && profile_.capabilities.imu_tracking &&
+        identity_.board_model == 1 && identity_.board_major == 0 &&
+        identity_.board_minor == 4 && identity_.board_patch == 0 &&
+        identity_.protocol_major == 2 && identity_.protocol_minor >= 20;
+}
+bool KinisiProtocol::supportsBoardIdle() const {
+    if (!ready_ || !profile_known_ || !profile_.power.board_idle ||
+        identity_.protocol_major != 2 || identity_.board_model != 1 || identity_.board_major != 0)
+        return false;
+    if (identity_.board_minor == 3 && identity_.board_patch <= 1)
+        return identity_.protocol_minor >= 18;
+    return identity_.board_minor == 4 && identity_.board_patch == 0 && identity_.protocol_minor >= 16;
+}
 bool KinisiProtocol::supportsPwmFrequency() const {
     return ready_ && identity_.protocol_major == 2 && identity_.protocol_minor >= 13 &&
         KINISI_WIRE_BUFFER_SIZE >= 8 && getPwmFrequencyOptions();
@@ -218,10 +289,36 @@ bool KinisiProtocol::validateVelocityTuning(uint8_t command, double kp, double k
     return true;
 }
 
+template<typename Orientation>
+bool KinisiProtocol::readPlatformOrientation(uint8_t field_id, Orientation& orientation) {
+    const uint8_t field[] = {field_id, 0};
+    uint8_t response[8];
+    if (!request(KINISI_GET_CONFIGURATION_FIELD, field, sizeof(field), response, sizeof(response))) return false;
+    const uint64_t bits = kinisi_codec::readUnsigned(response, sizeof(response));
+    if (bits == 0) orientation = static_cast<Orientation>(0);
+    else if (bits == UINT64_C(0x3ff0000000000000)) orientation = static_cast<Orientation>(1);
+    else return fail(KinisiFailure::MALFORMED_RESPONSE, KINISI_GET_CONFIGURATION_FIELD, 0);
+    return true;
+}
+
+bool KinisiProtocol::getMecanumRollerOrientation(KinisiMecanumRollerOrientation& orientation) {
+    return readPlatformOrientation(7, orientation);
+}
+
+bool KinisiProtocol::getOmniWheelOrientation(KinisiOmniWheelOrientation& orientation) {
+    return readPlatformOrientation(8, orientation);
+}
+
 bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t length,
                              uint8_t* response, uint8_t response_length) {
     error_ = {};
     if (!ready_) return fail(KinisiFailure::NOT_READY, command, 0);
+    const bool orientation_field = command == KINISI_GET_CONFIGURATION_FIELD && length == 2 &&
+                                   (payload[0] == 7 || payload[0] == 8) && payload[1] == 0;
+    if (orientation_field && identity_.protocol_minor < (payload[0] == 8 ? 26 : 25)) {
+        memset(response, 0, response_length); // Older firmware has one fixed layout for each platform.
+        return true;
+    }
     uint8_t required_minor = 0;
     switch (command) {
         case KINISI_INITIALIZE_MOTOR_POSITION_CONTROLLER:
@@ -237,6 +334,14 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
         case KINISI_GET_IMU: required_minor = 5; break;
         case KINISI_GET_MOTOR_CURRENT_LIMIT:
         case KINISI_SET_MOTOR_CURRENT_LIMIT: required_minor = 11; break;
+        case KINISI_INITIALIZE_OMNI_PLATFORM_ORIENTED: required_minor = 26; break;
+        case KINISI_INITIALIZE_MECANUM_PLATFORM_ORIENTED: required_minor = 25; break;
+        case KINISI_SAVE_CONFIGURATION:
+        case KINISI_GET_CONFIGURATION_FIELD: required_minor = 14; break;
+        case KINISI_SET_DRIVER_SLEEP:
+        case KINISI_GET_DRIVER_SLEEP: required_minor = 15; break;
+        case KINISI_SET_BOARD_IDLE:
+        case KINISI_GET_BOARD_IDLE: required_minor = 16; break;
         case KINISI_GET_PWM_FREQUENCY:
         case KINISI_SET_PWM_FREQUENCY: required_minor = 13; break;
         case KINISI_CLEAR_MOTOR_FAULTS: required_minor = 10; break;
@@ -250,6 +355,63 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     }
     if (identity_.protocol_minor < required_minor)
         return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+    if ((command == KINISI_SAVE_CONFIGURATION || (command == KINISI_GET_CONFIGURATION_FIELD && !orientation_field)) &&
+        !supportsConfigurationSave())
+        return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+    if (command == KINISI_SET_DRIVER_SLEEP || command == KINISI_GET_DRIVER_SLEEP) {
+        if (!supportsDriverSleep()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+        if (command == KINISI_SET_DRIVER_SLEEP && (length != 1 || payload[0] > 1))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    }
+    if (command == KINISI_SET_BOARD_IDLE || command == KINISI_GET_BOARD_IDLE) {
+        if (!supportsBoardIdle()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+        if (command == KINISI_SET_BOARD_IDLE && (length != 1 || payload[0] > 1))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    }
+    if (command == KINISI_GET_FEEDBACK_SOURCE_HEALTH) {
+        if (!supportsFeedbackSourceHealth()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+        if (length != 1 || payload[0] > 2)
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    }
+    if ((command == KINISI_SET_IMU_MOUNT || command == KINISI_GET_IMU_MOUNT) && !supportsImuMounting())
+        return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+    if ((command == KINISI_SET_BOARD_MOUNT || command == KINISI_GET_BOARD_MOUNT) && !supportsBoardMounting())
+        return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+    if ((command == KINISI_SET_IMU_MOUNT || command == KINISI_SET_BOARD_MOUNT) &&
+        (length != 18 || !validMount(payload, 10000000L)))
+        return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    if (command == KINISI_GET_FEEDBACK_IMU_CHANNELS && !supportsFeedbackImuChannels())
+        return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+    if (command >= KINISI_SET_FEEDBACK_SOURCE && command <= KINISI_GET_FEEDBACK_FUSION_MOUNT) {
+        if (!supportsFeedbackSourceSelector()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+        if ((command == KINISI_SET_FEEDBACK_SOURCE && (length != 1 || payload[0] > 2)) ||
+            (command == KINISI_GET_FEEDBACK_SOURCE_VECTOR && (length != 9 || payload[0] > 1)) ||
+            (command == KINISI_SET_FEEDBACK_FUSION_MOUNT && (length != 8 ||
+             (kinisi_codec::readUnsigned(payload, 8) & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x400921fb54442d18))))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    }
+    if (command >= KINISI_SET_IMU_TRACKING && command <= KINISI_GET_IMU_TRACKING_CONFIGURATION) {
+        if (!supportsImuTracking()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+        if (command == KINISI_SET_IMU_TRACKING) {
+            if (length != 10 || payload[0] > 3 || payload[1] > 1)
+                return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+            const double yaw = kinisi_codec::readDouble(payload + 2);
+            if (!isfinite(yaw) || fabs(yaw) > 3.141592653589793 ||
+                (payload[0] == 1 ? payload[1] != 0 || yaw != 0 : payload[1] != 1))
+                return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+        }
+        if (command == KINISI_GET_IMU_TRACKING_VECTOR && (length != 1 || payload[0] > 2))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    }
+    const bool fusion = command >= KINISI_SET_FUSION_EXPERIMENT && command <= KINISI_GET_FUSION_CONFIGURATION;
+    if (fusion) {
+        if (!supportsFusionExperiment()) return fail(KinisiFailure::UNSUPPORTED_COMMAND, command, 0);
+        if (command == KINISI_SET_FUSION_EXPERIMENT && (length != 9 || payload[0] > 2 ||
+            !isfinite(kinisi_codec::readDouble(payload + 1)) || fabs(kinisi_codec::readDouble(payload + 1)) > 3.141592653589793))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+        if (command == KINISI_GET_FUSION_VECTOR && (length != 1 || payload[0] > 4))
+            return fail(KinisiFailure::INVALID_ARGUMENT, command, 0, KinisiErrorCode::INVALID_ARGUMENT);
+    }
     int subscription_slot = -1;
     if (command == KINISI_SUBSCRIBE || command == KINISI_SUBSCRIBE_WITH_MODE || command == KINISI_SUBSCRIBE_CONFIGURED || command == KINISI_UNSUBSCRIBE) {
         const KinisiTopic topic = static_cast<KinisiTopic>(payload[0]);
@@ -330,6 +492,62 @@ bool KinisiProtocol::request(uint8_t command, const uint8_t* payload, uint8_t le
     uint32_t started = millis();
     if (!send(command, id, payload, length, response_length) ||
         !receive(command, command, id, response, response_length, started)) return false;
+    if ((command == KINISI_GET_IMU_MOUNT || command == KINISI_GET_BOARD_MOUNT) &&
+        (response_length != 19 || response[18] > 1 || !validMount(response, KINISI_MOUNT_READ_OFFSET_MAX_UM)))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (command == KINISI_GET_BOARD_MOUNT && !response[18]) {
+        for (uint8_t i = 0; i < 18; ++i)
+            if (response[i]) return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    }
+    if (command == KINISI_GET_FEEDBACK_IMU_CHANNELS) {
+        for (uint8_t channel = 0; channel < 2; ++channel) {
+            const uint64_t stamp = kinisi_codec::readUnsigned(response + 8 * channel, 8);
+            const uint32_t age = uint32_t(kinisi_codec::readUnsigned(response + 16 + 4 * channel, 4));
+            if (!stamp && age != UINT32_MAX) return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+        }
+    }
+    if (command == KINISI_GET_FEEDBACK_SOURCE_HEALTH &&
+        (response[0] != payload[0] || response[1] > 3 || response[2] > 9 || response[3] > 9))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (command == KINISI_GET_FEEDBACK_SOURCE_STATUS) {
+        const uint32_t age_us = uint32_t(kinisi_codec::readUnsigned(response + 21, 4));
+        const uint32_t max_age_us = uint32_t(kinisi_codec::readUnsigned(response + 25, 2)) * 1000UL;
+        const bool bad_sample = response[2] ?
+            response[1] != response[0] || response[3] != 0 || !max_age_us || age_us > max_age_us :
+            response[1] != 255 || response[3] == 0 || kinisi_codec::readUnsigned(response + 4, 4) != 0 ||
+            kinisi_codec::readUnsigned(response + 8, 8) != 0 || age_us != UINT32_MAX;
+        if (response[0] > 2 || response[2] > 1 || response[3] > 9 || bad_sample)
+            return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    }
+    if (command == KINISI_GET_FEEDBACK_FUSION_MOUNT && (response[0] > 1 ||
+        (kinisi_codec::readUnsigned(response + 1, 8) & UINT64_C(0x7fffffffffffffff)) > UINT64_C(0x400921fb54442d18)))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (command == KINISI_GET_IMU_TRACKING_STATUS &&
+        (response[0] > 4 || response[1] > 9 || response[2] > 15 || response[3] != 0))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (command == KINISI_GET_FEEDBACK_SOURCE_VECTOR || command == KINISI_GET_IMU_TRACKING_VECTOR) {
+        for (uint8_t offset = 4; offset < 28; offset += 8)
+            if (!isfinite(kinisi_codec::readDouble(response + offset))) return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    }
+    if (command == KINISI_GET_IMU_TRACKING_CONFIGURATION) {
+        // Check the binary64 wire value before AVR rounds it to its native double.
+        const uint64_t magnitude = kinisi_codec::readUnsigned(response, 8) & UINT64_C(0x7fffffffffffffff);
+        if (magnitude > UINT64_C(0x400921fb54442d18) || !kinisi_codec::readUnsigned(response + 8, 4))
+            return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    }
+    if (command == KINISI_GET_FUSION_STATUS && (response[0] > 2 || response[1] > 3 || response[2] > 9 || response[3] > 15))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (command == KINISI_GET_FUSION_VECTOR) {
+        for (uint8_t offset = 4; offset < 28; offset += 8)
+            if (!isfinite(kinisi_codec::readDouble(response + offset))) return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    }
+    if (command == KINISI_GET_FUSION_CONFIGURATION && (response[0] > 2 ||
+        !isfinite(kinisi_codec::readDouble(response + 1)) || fabs(kinisi_codec::readDouble(response + 1)) > 3.141592653589793))
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (command == KINISI_GET_DRIVER_SLEEP && response[0] > 1)
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
+    if (command == KINISI_GET_BOARD_IDLE && response[0] > 1)
+        return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
     if (current_limit && (response[0] > 1 || !kinisi_codec::readUnsigned(response + 1, 2)))
         return fail(KinisiFailure::MALFORMED_RESPONSE, command, id);
     if (fault_read) {

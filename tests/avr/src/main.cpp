@@ -3,11 +3,17 @@
 #include <Arduino.h>
 #include <kinisi.h>
 #include <kinisi_codec.h>
+#include "../../legacy_profile.h"
 KinisiController controller;
 
 /** Check AVR numeric conversions against fixed binary64 bytes on target startup. */
 void setup() {
     Serial.begin(9600);
+    if (!legacy_profile.hasSensor(KinisiSensor::IMU) || legacy_profile.power.driver_sleep ||
+            !legacy_profile_v215.power.driver_sleep || legacy_profile_v215.power.board_idle) {
+        Serial.println("FAIL legacy aggregate profile");
+        return;
+    }
     uint8_t bytes[8];
     kinisi_codec::writeDouble(bytes, -12.5);
     if (kinisi_codec::readUnsigned(bytes, 8) != UINT64_C(0xc029000000000000)) {
@@ -19,9 +25,17 @@ void setup() {
         Serial.println("FAIL binary64 decoding");
         return;
     }
+    for (int8_t sign = -1; sign <= 1; sign += 2) {
+        kinisi_codec::writeFusionYaw(bytes, sign * PI);
+        if (kinisi_codec::readUnsigned(bytes, 8) != (UINT64_C(0x400921fb54442d18) |
+                (sign < 0 ? UINT64_C(0x8000000000000000) : 0))) {
+            Serial.println("FAIL yaw endpoint encoding");
+            return;
+        }
+    }
     KinisiBoardProfile profile;
     if (!kinisiLookupBoardProfile(1, 0, 4, 0, profile) || profile.resources.motors != 4 ||
-            !profile.hasSensor(KinisiSensor::IMU)) {
+            !profile.hasSensor(KinisiSensor::IMU) || !profile.power.driver_sleep) {
         Serial.println("FAIL bundled flash profile");
         return;
     }
@@ -41,6 +55,10 @@ void setup() {
     // Compiles the IMU getter too; a default Uno rejects this before I2C (32-byte Wire).
     imu_sample sample = controller.get_imu(0);
     if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(sample.acceleration_z);
+    if (controller.supportsBoardMounting()) {
+        KinisiBoardMountGeometry mount{};
+        if (controller.getBoardMountGeometry(mount) && mount.configured) Serial.println(mount.y_m);
+    }
     if (controller.supportsTopic(KinisiTopic::TEMPERATURE))
         controller.subscribe(KinisiTopic::TEMPERATURE, 0, 250);
     if (controller.supportsMotorFaults(0)) {
@@ -67,6 +85,53 @@ void setup() {
         double amps = controller.get_motor_current(0);
         if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(amps);
         controller.subscribe(KinisiTopic::MOTOR_CURRENT, 0, 100);
+    }
+    if (controller.supportsFeedbackSourceHealth()) {
+        const auto health = controller.get_feedback_source_health(KinisiFeedbackSource::IMU_ONLY);
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(health.health);
+    }
+    if (controller.supportsFeedbackImuChannels()) {
+        const auto channels = controller.get_feedback_imu_channels();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(channels.gyro_age_us);
+    }
+    if (controller.supportsFeedbackSourceSelector()) {
+        feedback_source_status status{};
+        feedback_source_vector pose{}, twist{};
+        if (controller.readFeedbackSourceSnapshot(status, pose, twist) == KinisiFeedbackRead::VALID) {
+            Serial.println(status.sequence);
+            Serial.println(pose.x);
+        }
+    }
+    if (controller.supportsImuTracking()) {
+        imu_tracking_status status = controller.get_imu_tracking_status();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(status.elapsed_us);
+        imu_tracking_vector pose = controller.get_imu_tracking_vector(KinisiImuTrackingVectorKind::POSE);
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(pose.x);
+        imu_tracking_configuration configuration = controller.get_imu_tracking_configuration();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(configuration.window_us);
+        controller.set_imu_tracking(KinisiImuTrackingAction::STOP, 0, 0);
+    }
+    if (controller.supportsFusionExperiment()) {
+        fusion_configuration configuration = controller.get_fusion_configuration();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(configuration.mode);
+        fusion_status status = controller.get_fusion_status();
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(status.sequence);
+        fusion_vector pose = controller.get_fusion_vector(KinisiFusionVectorKind::FUSED_POSE);
+        if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(pose.x);
+        // Explicit legacy selection is compile checked only; never commands motion.
+        controller.set_fusion_experiment(KinisiFusionMode::LEGACY_ENCODER, 0.0);
+    }
+    if (controller.supportsDriverSleep()) {
+        if (controller.set_driver_sleep(1)) {
+            uint8_t sleeping = controller.get_driver_sleep();
+            if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(sleeping);
+        }
+    }
+    if (controller.supportsBoardIdle()) {
+        if (controller.set_board_idle(1)) {
+            uint8_t idle = controller.get_board_idle();
+            if (controller.lastError().failure == KinisiFailure::NONE) Serial.println(idle);
+        }
     }
 }
 

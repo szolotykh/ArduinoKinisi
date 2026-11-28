@@ -29,7 +29,21 @@ def validate(bundle):
     require(isinstance(bundle['boards'], list) and bool(bundle['boards']), 'Expected board profiles')
     identities = set()
     for profile in bundle['boards']:
-        fields(profile, ('board', 'resources', 'motor_features', 'sensors') + (('pwm_frequency',) if 'pwm_frequency' in profile else ()), 'board profile')
+        fields(profile, ('board', 'resources', 'motor_features', 'sensors') +
+               (('pwm_frequency',) if 'pwm_frequency' in profile else ()) +
+               (('power',) if 'power' in profile else ()) +
+               (('imu_geometry',) if 'imu_geometry' in profile else ()) +
+               (('capabilities',) if 'capabilities' in profile else ()), 'board profile')
+        if 'capabilities' in profile:
+            optional = ('imu_tracking', 'feedback_source_selector', 'feedback_source_health', 'imu_mounting')
+            fields(profile['capabilities'], ('fusion_experiment',) + tuple(key for key in optional if key in profile['capabilities']), 'capabilities')
+            for key, value in profile['capabilities'].items():
+                require(type(value) is bool, f'Invalid {key} capability')
+        if 'power' in profile:
+            fields(profile['power'], ('driver_sleep',) + (('board_idle',) if 'board_idle' in profile['power'] else ()), 'power capabilities')
+            require(type(profile['power']['driver_sleep']) is bool, 'Invalid driver sleep capability')
+            if 'board_idle' in profile['power']:
+                require(type(profile['power']['board_idle']) is bool, 'Invalid board idle capability')
         if 'pwm_frequency' in profile:
             pwm = profile['pwm_frequency']
             fields(pwm, ('default_hz', 'supported_hz'), 'PWM frequency')
@@ -46,6 +60,14 @@ def validate(bundle):
         identity = (board['model'], revision)
         require(identity not in identities, 'Duplicate board identity')
         identities.add(identity)
+        if 'imu_geometry' in profile:
+            require(identity == (1, '0.4.0'), 'IMU geometry requires the Mini v0.4.0 profile')
+            geometry = profile['imu_geometry']
+            fields(geometry, ('underside_center_to_imu_um',), 'IMU geometry')
+            vector = geometry['underside_center_to_imu_um']
+            require(isinstance(vector, list) and len(vector) == 3 and
+                    all(integer(v, -2**31, 2**31 - 1) for v in vector),
+                    'Expected three signed int32 board-frame IMU offsets')
         resources = profile['resources']
         fields(resources, ('motors', 'encoders', 'gpio', 'status_leds'), 'resources')
         require(all(integer(v, 0, 255) for v in resources.values()), 'Invalid resource count')
@@ -93,10 +115,13 @@ def generate(bundle):
 
 enum class KinisiSensor : uint8_t { TEMPERATURE, IMU };
 struct KinisiBoardResources { uint8_t motors, encoders, gpio, status_leds; };
+struct KinisiPowerCapabilities { bool driver_sleep; bool board_idle; };
+struct KinisiExperimentCapabilities { bool fusion_experiment; bool imu_tracking; bool feedback_source_selector; bool feedback_source_health; bool imu_mounting; };
 /** Discrete nominal thresholds in milliamps; count delimits the supported values. */
 struct KinisiCurrentLimitOptions { uint8_t threshold_count; uint16_t supported_thresholds_ma[THRESHOLD_CAPACITY]; bool can_disable; };
 struct KinisiPwmFrequencyOptions { uint32_t default_hz; uint8_t frequency_count; uint32_t supported_hz[PWM_CAPACITY]; };
 struct KinisiMotorFeatures { uint8_t id; bool current_sense, current_limit, fault_reporting; KinisiCurrentLimitOptions current_limit_options; };
+struct KinisiImuGeometry { bool present; int32_t underside_center_to_imu_um[3]; };
 struct KinisiImuFeatures { uint8_t id; bool accelerometer, gyroscope; };
 
 /** Public hardware metadata; counts delimit valid entries in each array. */
@@ -109,6 +134,8 @@ struct KinisiBoardProfile {
     header += f'    KinisiMotorFeatures motor_features[{motors}];\n'
     header += f'    uint8_t temperature_count, temperature_ids[{temperatures}];\n'
     header += f'    uint8_t imu_count;\n    KinisiImuFeatures imu[{imus}];\n'
+    header += '    KinisiPowerCapabilities power;\n    KinisiExperimentCapabilities capabilities;\n'
+    header += '    KinisiImuGeometry imu_geometry;\n'
     header += '''    /** Physical presence only; also check controller.supportsSensor before reading. */
     bool hasSensor(KinisiSensor kind, uint8_t index = 0) const {
         if (kind == KinisiSensor::TEMPERATURE) {
@@ -158,8 +185,14 @@ const KinisiBoardProfile profiles[] KINISI_PROFILE_STORAGE = {
         pwm = board.get('pwm_frequency', {})
         frequencies = pwm.get('supported_hz', [])
         pwm_value = '{' + f"{pwm.get('default_hz', 0)}UL, {len(frequencies)}, {{{', '.join(str(v) + 'UL' for v in frequencies) or '0'}}}" + '}'
+        power_value = '{' + ', '.join(str(board.get('power', {}).get(key, False)).lower() for key in ('driver_sleep', 'board_idle')) + '}'
+        capabilities = ', '.join(str(board.get('capabilities', {}).get(key, False)).lower()
+                                 for key in ('fusion_experiment', 'imu_tracking', 'feedback_source_selector', 'feedback_source_health', 'imu_mounting'))
+        geometry = board.get('imu_geometry')
+        vector = geometry['underside_center_to_imu_um'] if geometry else [0, 0, 0]
+        imu_geometry = '{' + str(geometry is not None).lower() + ', {' + ', '.join(map(str, vector)) + '}}'
         source += (f'    {{{model}, {revision}, {{{counts}}}, {pwm_value}, {{{motor_values}}}, '
-                   f'{len(temp)}, {{{temp_values}}}, {len(imu)}, {{{imu_values}}}}},\n')
+                   f'{len(temp)}, {{{temp_values}}}, {len(imu)}, {{{imu_values}}}, {power_value}, {{{capabilities}}}, {imu_geometry}}},\n')
     source += '''};
 }
 
