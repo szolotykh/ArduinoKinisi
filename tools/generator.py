@@ -170,7 +170,7 @@ def generate(schema, output, check=False):
         for p in o['properties']:
             types.append(f"    {p['type']} {p['name']}; ///< {p['description']}\n")
         types.append('};\n')
-    for key, name in [('subscription_triggers', 'KinisiSubscriptionTrigger'), ('subscription_deliveries', 'KinisiSubscriptionDelivery'), ('mecanum_roller_orientations', 'KinisiMecanumRollerOrientation')] + [(key, 'Kinisi' + name) for key, name, _, _ in FUSION_CATALOGS + IMU_TRACKING_CATALOGS + FEEDBACK_CATALOGS + HEALTH_CATALOGS]:
+    for key, name in [('subscription_triggers', 'KinisiSubscriptionTrigger'), ('subscription_deliveries', 'KinisiSubscriptionDelivery'), ('mecanum_roller_orientations', 'KinisiMecanumRollerOrientation'), ('omni_wheel_orientations', 'KinisiOmniWheelOrientation')] + [(key, 'Kinisi' + name) for key, name, _, _ in FUSION_CATALOGS + IMU_TRACKING_CATALOGS + FEEDBACK_CATALOGS + HEALTH_CATALOGS]:
         width = 'uint32_t' if key == 'feedback_source_health_flags' else 'uint8_t'
         types.append(f'enum class {name} : {width} {{\n')
         for item in schema.get(key, []):
@@ -244,7 +244,8 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
         props = c.get('properties', [])
         enum_types = {'telemetry_topic': 'KinisiTopic', 'subscription_mode': 'KinisiSubscriptionMode',
                       'subscription_trigger': 'KinisiSubscriptionTrigger', 'subscription_delivery': 'KinisiSubscriptionDelivery',
-                      'pwm_frequency': 'KinisiPwmFrequency', 'roller_orientation': 'KinisiMecanumRollerOrientation'}
+                      'pwm_frequency': 'KinisiPwmFrequency', 'roller_orientation': 'KinisiMecanumRollerOrientation',
+                      'wheel_orientation': 'KinisiOmniWheelOrientation'}
         args = ', '.join(enum_types.get(p.get('enum', p['name']), p['type']) + ' ' + p['name'] for p in props)
         if c['command'] == 'SUBSCRIBE':
             args += ', KinisiSubscriptionMode mode'
@@ -263,6 +264,8 @@ bool kinisiDecodeTelemetry(KinisiTopic topic, uint8_t index, const uint8_t* payl
             source.append('    if (mode != KinisiSubscriptionMode::PERIODIC) return subscribe_with_mode(topic_id, index, interval_ms, mode);\n')
         if velocity:
             source.append(f'    if (!validateVelocityTuning(KINISI_{c["command"]}, kp, ki, kd, integral_limit)) return false;\n')
+        if c['command'] == 'INITIALIZE_OMNI_PLATFORM_ORIENTED':
+            source.append('    if (wheel_orientation != KinisiOmniWheelOrientation::REAR && wheel_orientation != KinisiOmniWheelOrientation::FRONT)\n        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_INITIALIZE_OMNI_PLATFORM_ORIENTED, 0);\n')
         if c['command'] == 'INITIALIZE_MECANUM_PLATFORM_ORIENTED':
             source.append('    if (roller_orientation != KinisiMecanumRollerOrientation::STANDARD && roller_orientation != KinisiMecanumRollerOrientation::MIRRORED)\n        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_INITIALIZE_MECANUM_PLATFORM_ORIENTED, 0);\n')
         n = sum(size(p['type']) for p in props)
@@ -380,6 +383,7 @@ bool KinisiController::get{kind}MountGeometry(Kinisi{kind}MountGeometry& mount) 
     keywords += 'supportsMotorCurrent\tKEYWORD2\nsupportsMotorFaults\tKEYWORD2\n'
     keywords += 'supportsDriverSleep\tKEYWORD2\n'
     keywords += 'supportsBoardIdle\tKEYWORD2\n'
+    keywords += 'getOmniWheelOrientation\tKEYWORD2\nKinisiOmniWheelOrientation\tKEYWORD1\n'
     keywords += 'getMecanumRollerOrientation\tKEYWORD2\nKinisiMecanumRollerOrientation\tKEYWORD1\n'
     keywords += 'supportsBoardMounting\tKEYWORD2\nsetBoardMountGeometry\tKEYWORD2\ngetBoardMountGeometry\tKEYWORD2\nKinisiBoardMountGeometry\tKEYWORD1\n'
     keywords += 'supportsImuMounting\tKEYWORD2\nsetImuMountGeometry\tKEYWORD2\ngetImuMountGeometry\tKEYWORD2\nKinisiImuMountGeometry\tKEYWORD1\n'

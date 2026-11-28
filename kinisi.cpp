@@ -1118,6 +1118,24 @@ bool KinisiController::initialize_mecanum_platform_oriented(bool is_reversed_0, 
     return request(KINISI_INITIALIZE_MECANUM_PLATFORM_ORIENTED, payload, 41, nullptr, 0);
 }
 
+/** Encode INITIALIZE_OMNI_PLATFORM_ORIENTED, match its reply, and decode the payload. */
+bool KinisiController::initialize_omni_platform_oriented(bool is_reversed_0, bool is_reversed_1, bool is_reversed_2, bool is_encoder_reversed_0, bool is_encoder_reversed_1, bool is_encoder_reversed_2, double wheels_diameter, double robot_radius, double encoder_resolution, KinisiOmniWheelOrientation wheel_orientation) {
+    if (wheel_orientation != KinisiOmniWheelOrientation::REAR && wheel_orientation != KinisiOmniWheelOrientation::FRONT)
+        return fail(KinisiFailure::INVALID_ARGUMENT, KINISI_INITIALIZE_OMNI_PLATFORM_ORIENTED, 0);
+    uint8_t payload[31] = {0};
+    kinisi_codec::writeUnsigned(payload + 0, static_cast<uint64_t>(is_reversed_0), 1);
+    kinisi_codec::writeUnsigned(payload + 1, static_cast<uint64_t>(is_reversed_1), 1);
+    kinisi_codec::writeUnsigned(payload + 2, static_cast<uint64_t>(is_reversed_2), 1);
+    kinisi_codec::writeUnsigned(payload + 3, static_cast<uint64_t>(is_encoder_reversed_0), 1);
+    kinisi_codec::writeUnsigned(payload + 4, static_cast<uint64_t>(is_encoder_reversed_1), 1);
+    kinisi_codec::writeUnsigned(payload + 5, static_cast<uint64_t>(is_encoder_reversed_2), 1);
+    kinisi_codec::writeDouble(payload + 6, wheels_diameter);
+    kinisi_codec::writeDouble(payload + 14, robot_radius);
+    kinisi_codec::writeDouble(payload + 22, encoder_resolution);
+    kinisi_codec::writeUnsigned(payload + 30, static_cast<uint64_t>(wheel_orientation), 1);
+    return request(KINISI_INITIALIZE_OMNI_PLATFORM_ORIENTED, payload, 31, nullptr, 0);
+}
+
 KinisiFeedbackRead KinisiController::readFeedbackSourceSnapshot(feedback_source_status& status,
         feedback_source_vector& pose, feedback_source_vector& twist) {
     status = {}; pose = {}; twist = {};

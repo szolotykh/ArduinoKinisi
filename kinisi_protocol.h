@@ -67,6 +67,8 @@ public:
     bool supportsConfigurationSave() const;
     /** Read the configured mecanum layout. Firmware before 2.25 always uses STANDARD. */
     bool getMecanumRollerOrientation(KinisiMecanumRollerOrientation& orientation);
+    /** Read the configured single-wheel position. Firmware before 2.26 always uses REAR. */
+    bool getOmniWheelOrientation(KinisiOmniWheelOrientation& orientation);
     /** Require READY and an exact profile: v0.3/Nano protocol 2.17+, v0.4 protocol 2.15+. */
     bool supportsDriverSleep() const;
     /** Require READY and an exact idle-capable profile: v0.3/Nano 2.18+, v0.4 2.16+. */
@@ -99,6 +101,7 @@ protected:
     bool request(uint8_t command, const uint8_t* payload, uint8_t length,
                  uint8_t* response, uint8_t response_length);
 private:
+    template<typename Orientation> bool readPlatformOrientation(uint8_t field_id, Orientation& orientation);
     uint8_t address_;
     uint16_t next_id_;
     uint32_t timeout_ms_;

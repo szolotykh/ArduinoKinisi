@@ -1184,7 +1184,56 @@ static void mecanum_roller_orientation() {
     }
 }
 
+static void omni_wheel_orientation() {
+    using Layout = KinisiOmniWheelOrientation;
+    KinisiController c;
+    auto initialize = [&](Layout layout) {
+        return c.initialize_omni_platform_oriented(true,false,true,false,true,false,.1,.17,4096.,layout);
+    };
+    reset(3,25);
+    assert(c.begin(1000,0));
+    auto before = Wire.transactions;
+    Layout applied = Layout::FRONT;
+    assert(c.getOmniWheelOrientation(applied) && applied == Layout::REAR);
+    assert(!initialize(Layout::FRONT) && c.lastError().failure == KinisiFailure::UNSUPPORTED_COMMAND);
+    assert(Wire.transactions == before);
+    for (uint8_t revision : {3, 4}) {
+        reset(revision,26);
+        assert(c.begin(1000,0));
+        for (Layout layout : {Layout::REAR, Layout::FRONT}) {
+            Wire.responder = [layout](const std::vector<uint8_t>& r) {
+                const uint16_t id = r[2] | uint16_t(r[3]) << 8;
+                if (r[1] == KINISI_GET_CONFIGURATION_FIELD) {
+                    assert(r.size() == 6 && r[4] == 8 && r[5] == 0);
+                    std::vector<uint8_t> response(8);
+                    kinisi_codec::writeDouble(response.data(), static_cast<uint8_t>(layout));
+                    Wire.responses.push_back(frame(r[1], id, response));
+                } else {
+                    assert(r[1] == 0x31 || r[1] == 0x88);
+                    assert(r.size() == (r[1] == 0x88 ? 35U : 34U));
+                    assert(r[4] && !r[5] && r[6] && !r[7] && r[8] && !r[9]);
+                    assert(kinisi_codec::readDouble(r.data()+10) == .1);
+                    assert(kinisi_codec::readDouble(r.data()+18) == .17);
+                    assert(kinisi_codec::readDouble(r.data()+26) == 4096.);
+                    if (r[1] == 0x88) assert(r[34] == static_cast<uint8_t>(layout));
+                    Wire.responses.push_back(frame(r[1], id));
+                }
+            };
+            before = Wire.transactions;
+            assert(!initialize(static_cast<Layout>(2)) && c.lastError().failure == KinisiFailure::INVALID_ARGUMENT);
+            const bool legacy = c.initialize_omni_platform(true,false,true,false,true,false,.1,.17,4096.);
+            assert(legacy == (KINISI_WIRE_BUFFER_SIZE >= 34));
+            if (!legacy) assert(c.lastError().failure == KinisiFailure::FRAME_TOO_LARGE);
+            assert(initialize(layout) == (KINISI_WIRE_BUFFER_SIZE >= 35));
+            if (KINISI_WIRE_BUFFER_SIZE < 35) assert(c.lastError().failure == KinisiFailure::FRAME_TOO_LARGE);
+            assert(Wire.transactions == before + size_t(legacy) + size_t(KINISI_WIRE_BUFFER_SIZE >= 35));
+            assert(c.getOmniWheelOrientation(applied) && applied == layout);
+        }
+    }
+}
+
 int main() {
+    omni_wheel_orientation();
     mecanum_roller_orientation();
     board_mounting();
     imu_mounting();

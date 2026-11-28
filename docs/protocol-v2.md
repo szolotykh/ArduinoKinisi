@@ -5,12 +5,27 @@ identifies the SDK as Arduino 2.5.0, reads the controller identity, and waits fo
 READY. `boardInfo()` exposes hardware revision, protocol version and firmware Git
 build identity; `ready()` reports session readiness.
 
-The library includes protocol 2.25 commands while accepting firmware 2.1+ within
+The library includes protocol 2.26 commands while accepting firmware 2.1+ within
 protocol major 2. Major versions break existing wire interfaces and must match.
 Minor versions add compatible commands; patch versions provide compatible fixes
 and do not block connection. New commands are gated individually. Protocol
 versions are independent of SDK releases and physical board revisions; INIT
 does not translate between major versions.
+
+## Three-wheel Omni layout over Wire
+
+`initialize_omni_platform(...)` configures the original triangle with W2 at the rear. Protocol 2.26 adds an initializer for either single-wheel position. For the front layout, turn the entire triangle 180° in the robot frame. W2 sits at the front, W0 at rear left and W1 at rear right. Use the corresponding motor and encoder ports and set each wheel's polarity independently.
+
+```cpp
+using Layout = KinisiOmniWheelOrientation;
+if (!controller.initialize_omni_platform_oriented(
+        false, false, false, false, false, false,
+        0.10, 0.17, 4096, Layout::FRONT)) return;
+Layout applied;
+if (!controller.getOmniWheelOrientation(applied)) return;
+```
+
+The original initializer needs a 34-byte Wire write and the oriented initializer needs 35 bytes. A 32-byte AVR Wire buffer rejects both before transmission. Use a core with sufficient actual TX capacity and set `KINISI_WIRE_BUFFER_SIZE` to match, or initialize over USB. The six-byte query and twelve-byte reply fit the default Wire buffer. Earlier firmware supports the original initializer and the SDK returns `REAR` locally.
 
 ## Four-wheel mecanum layout over Wire
 
